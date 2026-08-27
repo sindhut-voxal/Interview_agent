@@ -28,7 +28,9 @@ class InterviewState:
 
     def add_answer(self, answer: str):
 
-        current_question = self.get_current_question()
+        current_question = (
+            self.get_current_question()
+        )
 
         if current_question is None:
             return
@@ -41,11 +43,20 @@ class InterviewState:
         )
 
 
+    def add_evaluation(self, evaluation: dict):
+
+        self.evaluations.append(
+            evaluation
+        )
+
+
     def move_to_next_question(self):
+
         self.current_question_index += 1
 
 
     def is_interview_complete(self):
+
         return (
             self.current_question_index
             >= len(self.questions)

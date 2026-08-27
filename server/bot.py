@@ -1,134 +1,105 @@
 import os
-
 from dotenv import load_dotenv
+load_dotenv()
+
+#python library for logs
 from loguru import logger
 
+from prompt import SYSTEM_PROMPT
 
-from prompt import SYSTEM_PROMPT_TEMPLATE
-from document_loader import (
-    load_resume,
-    load_job_description,
-)
-from question_generator import generate_questions
-from interview_manager import InterviewManager
+#handles state
+from interview.controller import InterviewController
+#controls what goes to the LLM
+from interview_processor import InterviewProcessor
 
 from pipecat.frames.frames import TTSSpeakFrame
 
+#connects different frame processors together
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import (
-    PipelineParams,
-    PipelineTask,
-)
+from pipecat.pipeline.task import (PipelineParams,PipelineTask)
 
-from pipecat.processors.aggregators.llm_context import (
-    LLMContext,
-)
-from pipecat.processors.aggregators.llm_response_universal import (
-    LLMContextAggregatorPair,
-)
+#stores context for LLM
+from pipecat.processors.aggregators.llm_context import (LLMContext)
 
+from pipecat.processors.aggregators.llm_response_universal import (LLMContextAggregatorPair)
+
+#STT,LLM,TTS
 from pipecat.services.google.llm import GoogleLLMService
-
 from pipecat.services.deepgram.stt import DeepgramSTTService
 from pipecat.services.deepgram.tts import DeepgramTTSService
 
-from pipecat.transports.base_transport import (
-    TransportParams,
-)
-from pipecat.transports.smallwebrtc.transport import (
-    SmallWebRTCTransport,
-)
+from pipecat.transports.base_transport import (TransportParams)
+from pipecat.transports.smallwebrtc.transport import (SmallWebRTCTransport)
 
-from pipecat.runner.types import (
-    RunnerArguments,
-    SmallWebRTCRunnerArguments,
-)
+from pipecat.runner.types import (RunnerArguments, SmallWebRTCRunnerArguments)
 
+#Debugger for pipecat-visualise the flow of each frame
 from pipecat_whisker import WhiskerObserver
 
-from pipecat.services.tts_service import (
-    TextAggregationMode,
-)
+from pipecat.services.tts_service import (TextAggregationMode)
 
-load_dotenv()
+RESUME = """
+AI Engineer Intern
 
-from interview_processor import (
-    InterviewProcessor,
-)
+Skills:
+Python, Machine Learning, Deep Learning,
+Generative AI, FastAPI, Docker
+
+Projects:
+
+1. AI Language Tutor
+Built a real-time AI language tutor using
+Pipecat, Deepgram, Gemini and WebRTC.
+
+2. Interview Agent
+Built an AI-powered interview system capable
+of asking questions and evaluating candidate
+responses.
+"""
+
+
+JOB_DESCRIPTION = """
+We are looking for an AI Engineer.
+
+Required skills:
+
+- Strong Python programming
+- Experience with Large Language Models
+- Machine Learning fundamentals
+- API development
+- FastAPI
+- Docker
+"""
+
 
 async def run_bot(transport):
+    logger.info("Starting AI Interview Agent")
+    logger.info("Creating interview...")
 
-    logger.info(
-        "Starting AI Interview Agent..."
+    controller = InterviewController()
+
+    state = await controller.create_interview(
+        resume=RESUME,
+        job_description=JOB_DESCRIPTION,
     )
 
-    # --------------------------------
-    # Load documents
-    # --------------------------------
+    logger.info(f"Generated {len(state.questions)} questions")
 
-    resume = load_resume()
-
-    job_description = (
-        load_job_description()
-    )
-
-    logger.info(
-        "Resume and Job Description loaded"
-    )
-
-    # --------------------------------
-    # Generate interview questions
-    # --------------------------------
-
-    logger.info(
-        "Generating interview questions..."
-    )
-
-    questions = generate_questions(
-        resume=resume,
-        job_description=job_description,
-    )
-
-    logger.info(
-        f"Generated {len(questions)} questions"
-    )
-
-    for question in questions:
-
+    for question in state.questions:
         logger.info(
             f"Q{question['id']}: "
             f"{question['question']}"
         )
 
-    # --------------------------------
-    # Create Interview Manager
-    # --------------------------------
+    interview_processor = InterviewProcessor(controller=controller, state=state)
 
-    interview_manager = InterviewManager(
-        questions
-    )
-    interview_processor = InterviewProcessor(
-    interview_manager
-    )
-    # --------------------------------
-    # Services
-    # --------------------------------
+    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
 
-    stt = DeepgramSTTService(
-        api_key=os.getenv(
-            "DEEPGRAM_API_KEY"
-        ),
-    )
-
-    system_prompt = (
-        SYSTEM_PROMPT_TEMPLATE.render()
-    )
+    system_prompt = (SYSTEM_PROMPT_TEMPLATE.render())
 
     llm = GoogleLLMService(
-        api_key=os.getenv(
-            "GOOGLE_API_KEY"
-        ),
+        api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(
             model="gemma-4-26b-a4b-it",
             system_instruction=system_prompt,
@@ -146,96 +117,34 @@ async def run_bot(transport):
             voice="aura-asteria-en",
         ),
     )
+    context = LLMContext(messages=[])
+    context_aggregator = (LLMContextAggregatorPair(context))
 
-    # --------------------------------
-    # Conversation Context
-    # --------------------------------
-
-    context = LLMContext(
-        messages=[]
-    )
-
-    context_aggregator = (
-        LLMContextAggregatorPair(
-            context
-        )
-    )
-
-    # --------------------------------
-    # Pipeline
-    # --------------------------------
     pipeline = Pipeline(
     [
-        # Browser microphone
         transport.input(),
-
-        # Speech -> Text
         stt,
-
-        # Controls interview progression
         interview_processor,
-
-        # Receives controlled LLM messages
         context_aggregator.user(),
-
-        # LLM
         llm,
-
-        # Text -> Speech
         tts,
-
-        # Send audio to browser
         transport.output(),
-
-        # Save assistant response
         context_aggregator.assistant(),
     ]
 )
+    task = PipelineTask(pipeline,params=PipelineParams(allow_interruptions=True,enable_metrics=True,enable_usage_metrics=True))
 
-    task = PipelineTask(
-        pipeline,
-        params=PipelineParams(
-            allow_interruptions=True,
-            enable_metrics=True,
-            enable_usage_metrics=True,
-        ),
-    )
+    task.add_observer(WhiskerObserver(task.pipeline))
 
-    task.add_observer(
-        WhiskerObserver(
-            task.pipeline
-        )
-    )
 
-    # --------------------------------
-    # Client Connected
-    # --------------------------------
+    @transport.event_handler("on_client_connected")
+    async def on_client_connected(transport,client):
+        logger.info("Candidate connected")
 
-    @transport.event_handler(
-        "on_client_connected"
-    )
-    async def on_client_connected(
-        transport,
-        client,
-    ):
-
-        logger.info(
-            "Candidate connected"
-        )
-
-        first_question = (
-            interview_manager
-            .get_current_question()
-        )
-
+        first_question = (state.get_current_question())
         if first_question is None:
-
-            logger.error(
-                "No interview questions generated"
-            )
-
+            logger.error("No interview questions generated")
             return
-
         intro = (
             "Hello. Welcome to your interview. "
             "I will ask you a series of questions "
@@ -243,70 +152,29 @@ async def run_bot(transport):
             "Please answer each question before we move on. "
             "Let's begin. "
         )
-
-        await task.queue_frame(
-            TTSSpeakFrame(
-                intro
-                + first_question[
-                    "question"
-                ]
-            )
-        )
-
-    # --------------------------------
-    # Client Disconnected
-    # --------------------------------
+    #this skips the LLM and speaks the text given using the TTS service.
+        await task.queue_frame(TTSSpeakFrame(intro + first_question["question"]))
 
     @transport.event_handler(
         "on_client_disconnected"
     )
-    async def on_client_disconnected(
-        transport,
-        client,
-    ):
-
-        logger.info(
-            "Candidate disconnected"
-        )
-
+    async def on_client_disconnected(transport,client):
+        logger.info("Candidate disconnected")
     runner = PipelineRunner()
-
     await runner.run(task)
 
-
-async def bot(
-    runner_args: RunnerArguments,
-):
-
-    if isinstance(
-        runner_args,
-        SmallWebRTCRunnerArguments,
-    ):
-
+async def bot(runner_args: RunnerArguments):
+    if isinstance(runner_args,SmallWebRTCRunnerArguments):
         transport = SmallWebRTCTransport(
-            params=TransportParams(
-                audio_in_enabled=True,
-                audio_out_enabled=True,
-            ),
-            webrtc_connection=(
-                runner_args.webrtc_connection
-            ),
-        )
-
+            params=TransportParams(audio_in_enabled=True,audio_out_enabled=True),
+            webrtc_connection=(runner_args.webrtc_connection),
+)
     else:
-
-        logger.error(
-            f"Unsupported runner arguments: "
-            f"{type(runner_args)}"
-        )
-
+        logger.error( f"Unsupported runner arguments: "f"{type(runner_args)}")
         return
-
     await run_bot(transport)
 
 
 if __name__ == "__main__":
-
     from pipecat.runner.run import main
-
     main()

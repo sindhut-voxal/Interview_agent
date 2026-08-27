@@ -46,73 +46,102 @@ async def main():
         job_description=JOB_DESCRIPTION,
     )
 
-    # -------------------------
-    # Question 1
-    # -------------------------
+    answers = [
+        """
+        I have used Python extensively in my AI projects.
+        In my AI Language Tutor, I used Python and Pipecat
+        to build the backend pipeline.
+        """,
 
-    current_question = state.get_current_question()
+        """
+        I have worked with Docker to manage application
+        dependencies and ensure consistent environments.
+        I would define dependencies in a Dockerfile and
+        run the application inside a container.
+        """,
 
-    print("QUESTION 1:")
-    print(current_question["question"])
+        """
+        In my AI Language Tutor, latency was an important
+        challenge. I measured the different stages of the
+        pipeline such as speech-to-text, LLM processing,
+        and text-to-speech to identify bottlenecks.
+        """,
 
-    answer_1 = """
-    I used Python extensively in my AI projects.
-    In my AI Language Tutor, I used Python with
-    Pipecat to build the backend pipeline.
-    """
+        """
+        For managing LLM context, I would avoid continuously
+        sending the entire conversation. I could use strategies
+        such as summarization or a sliding context window.
+        """,
 
-    next_question = controller.submit_answer(
-        state,
-        answer_1,
-    )
+        """
+        To scale the Interview Agent, I would containerize
+        the application using Docker and deploy multiple
+        FastAPI instances behind a load balancer. Heavy AI
+        processing could be moved to separate services.
+        """
+    ]
 
-    print("\nAnswer stored.")
+    while not state.is_interview_complete():
+
+        current_question = state.get_current_question()
+
+        print("\n" + "=" * 60)
+
+        print(
+            f"QUESTION {current_question['id']}:"
+        )
+
+        print(
+            current_question["question"]
+        )
+
+        answer = answers[
+            state.current_question_index
+        ]
+
+        print("\nANSWER:")
+
+        print(answer.strip())
+
+        await controller.submit_answer(
+            state,
+            answer,
+        )
+
+        evaluation = state.evaluations[-1]
+
+        print("\nEVALUATION:")
+
+        print(
+            json.dumps(
+                evaluation,
+                indent=4,
+            )
+        )
+
+    print("\n" + "=" * 60)
+
+    print("\n--- INTERVIEW COMPLETE ---\n")
 
     print(
-        "Current question index:",
-        state.current_question_index,
+        "Final Score:",
+        state.final_score,
     )
 
-    print("\nNEXT QUESTION:")
-
-    print(next_question["question"])
-
-
-    # -------------------------
-    # Question 2
-    # -------------------------
-
-    answer_2 = """
-    I have worked with LLMs such as Gemini
-    for generating responses in AI applications.
-    """
-
-    next_question = controller.submit_answer(
-        state,
-        answer_2,
-    )
-
-    print("\nAnswer stored.")
-
-    print(
-        "Current question index:",
-        state.current_question_index,
-    )
-
-    print("\nNEXT QUESTION:")
-
-    print(next_question["question"])
-
-
-    # -------------------------
-    # Stored answers
-    # -------------------------
-
-    print("\n--- STORED ANSWERS ---\n")
+    print("\n--- ALL ANSWERS ---\n")
 
     print(
         json.dumps(
             state.answers,
+            indent=4,
+        )
+    )
+
+    print("\n--- ALL EVALUATIONS ---\n")
+
+    print(
+        json.dumps(
+            state.evaluations,
             indent=4,
         )
     )
