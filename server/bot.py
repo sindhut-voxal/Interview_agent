@@ -39,6 +39,8 @@ from pipecat_whisker import WhiskerObserver
 
 from pipecat.services.tts_service import (TextAggregationMode)
 
+from .text_normaliser import (TextNormalizerProcessor)
+
 RESUME = """
 AI Engineer Intern
 
@@ -120,6 +122,8 @@ async def run_bot(transport):
     context = LLMContext(messages=[])
     context_aggregator = (LLMContextAggregatorPair(context))
 
+    text_normalizer = (TextNormalizerProcessor())
+
     pipeline = Pipeline(
     [
         transport.input(),
@@ -127,6 +131,7 @@ async def run_bot(transport):
         interview_processor,
         context_aggregator.user(),
         llm,
+        text_normalizer,
         tts,
         transport.output(),
         context_aggregator.assistant(),
