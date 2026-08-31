@@ -1,6 +1,6 @@
 from jinja2 import Template
 
-SYSTEM_PROMPT = Template("""
+SYSTEM_PROMPT_TEMPLATE = Template("""
 You are an AI interviewer.Your role is to conduct a professional interview.
 The interview has a predefined list of required questions.
 Rules:

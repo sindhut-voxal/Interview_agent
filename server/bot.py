@@ -5,7 +5,7 @@ load_dotenv()
 #python library for logs
 from loguru import logger
 
-from prompt import SYSTEM_PROMPT
+from prompt import SYSTEM_PROMPT_TEMPLATE
 
 #handles state
 from interview.controller import InterviewController
@@ -38,8 +38,7 @@ from pipecat.runner.types import (RunnerArguments, SmallWebRTCRunnerArguments)
 from pipecat_whisker import WhiskerObserver
 
 from pipecat.services.tts_service import (TextAggregationMode)
-
-from .text_normaliser import (TextNormalizerProcessor)
+from text_normaliser import (TextNormalizerProcessor)
 
 RESUME = """
 AI Engineer Intern
@@ -116,7 +115,7 @@ async def run_bot(transport):
             TextAggregationMode.TOKEN
         ),
         settings=DeepgramTTSService.Settings(
-            voice="aura-asteria-en",
+            voice="aura-2-juno-en",
         ),
     )
     context = LLMContext(messages=[])
