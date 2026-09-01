@@ -220,15 +220,24 @@ async function extractTextFromFile(file){
 }
 
 async function detectRunner(){
-  const candidates=['', 'http://localhost:7860', 'http://127.0.0.1:7860'];
+  // Prefer dedicated voice runner on 7860; app server on 8000 does NOT serve /api/offer
+  const candidates=['http://localhost:7860', 'http://127.0.0.1:7860', ''];
   for(const base of candidates){
     try{
       const url = base ? `${base}/api/offer` : '/api/offer';
-      // probe with OPTIONS or GET — if 405 it's there
+      // OPTIONS 405 means endpoint exists (Pipecat only handles POST/PATCH), so treat any HTTP response as success
       const r=await fetch(url,{method:'OPTIONS'});
-      // if we get any response, assume base works
       runnerBase = base || location.origin;
       $('runnerPort').textContent = new URL(runnerBase, location.origin).port || '7860';
+      // If we got 405 from origin (app.py) that is NOT the voice runner — keep trying 7860 first, but if 7860 unreachable we fell through catch
+      // Verify runner by checking it also responds to POST-like; if origin returned 405 we still want to prefer 7860 if reachable
+      if(!base && r.status===405){
+        // origin has no /api/offer — check if 7860 is actually alive via health
+        try{
+          const h=await fetch('http://localhost:7860/api/health',{method:'GET'});
+          if(h.ok){ runnerBase='http://localhost:7860'; $('runnerPort').textContent='7860'; return runnerBase; }
+        }catch{}
+      }
       return runnerBase;
     }catch{ }
   }
@@ -295,7 +304,8 @@ async function startVoice(){
     let pendingCandidates=[];
     pc.onicecandidate = async (e)=>{
       if(e.candidate && pcId){
-        const cand = { candidate:e.candidate.candidate, sdpMid:e.candidate.sdpMid, sdpMLineIndex:e.candidate.sdpMLineIndex };
+        // Pipecat expects snake_case sdp_mid / sdp_mline_index (422 fix), keep camel for compat
+        const cand = { candidate:e.candidate.candidate, sdp_mid:e.candidate.sdpMid, sdp_mline_index:e.candidate.sdpMLineIndex, sdpMid:e.candidate.sdpMid, sdpMLineIndex:e.candidate.sdpMLineIndex };
         try{ await fetch(patchUrl,{method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pc_id:pcId, candidates:[cand] }) }); }catch{}
       } else if(e.candidate){
         pendingCandidates.push(e.candidate);
@@ -328,7 +338,7 @@ async function startVoice(){
 
     // flush pending candidates
     for(const c of pendingCandidates){
-      try{ await fetch(patchUrl,{method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pc_id:pcId, candidates:[{ candidate:c.candidate, sdpMid:c.sdpMid, sdpMLineIndex:c.sdpMLineIndex }] }) }); }catch{}
+      try{ await fetch(patchUrl,{method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pc_id:pcId, candidates:[{ candidate:c.candidate, sdp_mid:c.sdpMid, sdp_mline_index:c.sdpMLineIndex, sdpMid:c.sdpMid, sdpMLineIndex:c.sdpMLineIndex }] }) }); }catch{}
     }
     pendingCandidates=[];
 

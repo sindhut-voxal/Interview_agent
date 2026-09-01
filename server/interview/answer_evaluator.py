@@ -116,7 +116,7 @@ async def evaluate_answer(
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(
-            model="gemma-4-26b-a4b-it",
+            model="Gemini-3.7-Flash",
         ),
     )
 

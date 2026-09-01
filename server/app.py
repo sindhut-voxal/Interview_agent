@@ -90,10 +90,14 @@ def _fallback_feedback(answer: str, weight: int):
 
 def _write_latest_interview(resume: str, jd: str):
     """Write latest resume/JD so the Pipecat bot (voice mode) can pick it up."""
+    import tempfile
     payload = {"resume": resume, "job_description": jd}
-    for p in [SERVER_DIR / "latest_interview.json", pathlib.Path("/tmp/latest_interview.json")]:
+    tmp_path = pathlib.Path(tempfile.gettempdir()) / "latest_interview.json"
+    for p in [SERVER_DIR / "latest_interview.json", tmp_path]:
         try:
+            p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            logger.debug(f"Wrote latest interview to {p}")
         except Exception as e:
             logger.warning(f"Failed to write {p}: {e}")
 
@@ -101,6 +105,15 @@ def _write_latest_interview(resume: str, jd: str):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "sessions": len(sessions)}
+
+
+@app.api_route("/api/offer", methods=["GET", "POST", "OPTIONS", "PATCH"])
+async def offer_hint():
+    """Hint when UI hits app server (8000) instead of voice runner (7860)."""
+    return JSONResponse(
+        {"detail": "Voice runner not running on this port. Start `python server/bot.py` (WebRTC on :7860). UI should POST to http://localhost:7860/api/offer"},
+        status_code=503,
+    )
 
 
 @app.post("/api/extract")

@@ -78,8 +78,10 @@ import json
 import pathlib
 
 def _load_dynamic_docs():
+    import tempfile
     candidate_paths = [
         pathlib.Path(__file__).parent / "latest_interview.json",
+        pathlib.Path(tempfile.gettempdir()) / "latest_interview.json",
         pathlib.Path("/tmp/latest_interview.json"),
         pathlib.Path(__file__).parent / ".." / "latest_interview.json",
     ]
@@ -154,7 +156,7 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(
-            model="gemma-4-26b-a4b-it",
+            model="Gemini-3.7-Flash",
             system_instruction=system_prompt,
         ),
     )

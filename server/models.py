@@ -3,8 +3,7 @@ from google import genai
 
 # Automatically picks up GEMINI_API_KEY or GOOGLE_API_KEY from environment variables
 # Alternatively, pass it directly: genai.Client(api_key="YOUR_API_KEY")
-client = genai.Client(api_key="AIzaSyA93tr6r64M6U6YDtZFgQf4PUspXhr-cQA")
-
+client = genai.Client(api_key="")
 print("Available Gemini Models:\n")
 for m in client.models.list():
     print(f"Name: {m.name}")
