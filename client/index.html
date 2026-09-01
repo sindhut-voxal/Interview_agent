@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Voxal — 10-min Screening Interview (Voice)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  * { font-family: 'Inter', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  .glass { backdrop-filter: blur(12px); }
+  .drag-active { border-color: #6366f1 !important; background: #eef2ff !important; }
+  .pulse-ring { animation: pulse-ring 2s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite; }
+  @keyframes pulse-ring { 0% { transform: scale(0.33); opacity: 1; } 80%,100% { transform: scale(1.4); opacity: 0; } }
+  .speaking { animation: speaking 1.2s ease-in-out infinite; }
+  @keyframes speaking { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+</style>
+</head>
+<body class="bg-[#f8f9fb] text-zinc-900 min-h-screen">
+  <header class="sticky top-0 z-40 bg-white/80 glass border-b border-zinc-200">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold">V</div>
+        <div><div class="font-semibold leading-none">Voxal</div><div class="text-xs text-zinc-500">AI Screening Interview — Voice</div></div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="hidden sm:inline text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">~10 min • 6 questions • voice</span>
+        <span id="headerStatus" class="text-xs px-2.5 py-1 rounded-full bg-white border border-zinc-200 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-zinc-300" id="statusDot"></span><span id="statusText">Idle</span></span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+    <div id="stepper" class="flex items-center justify-center gap-2 mb-8">
+      <div id="s1" class="flex items-center gap-2 text-sm font-medium text-indigo-600"><span class="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs">1</span> Upload</div>
+      <div class="w-10 h-px bg-zinc-300"></div>
+      <div id="s2" class="flex items-center gap-2 text-sm text-zinc-400"><span class="w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center text-xs">2</span> Voice interview</div>
+    </div>
+
+    <section id="uploadStep" class="grid lg:grid-cols-2 gap-6">
+      <div class="bg-white rounded-2xl border border-zinc-200 p-5 sm:p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold flex items-center gap-2">📄 Resume</h2>
+          <span class="text-xs text-zinc-500 bg-zinc-100 px-2 py-1 rounded-full">PDF / DOCX / TXT</span>
+        </div>
+        <label id="resumeDrop" class="block border-2 border-dashed border-zinc-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/50 transition">
+          <input id="resumeFile" type="file" accept=".pdf,.docx,.doc,.txt,.md" class="hidden" />
+          <div class="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center mx-auto mb-2">⬆️</div>
+          <p class="text-sm font-medium">Drop resume here or <span class="text-indigo-600 underline">browse</span></p>
+          <p id="resumeFileName" class="text-xs text-zinc-500 mt-1">No file chosen</p>
+        </label>
+        <div class="relative my-4"><div class="absolute inset-0 flex items-center"><div class="w-full border-t border-zinc-200"></div></div><div class="relative flex justify-center"><span class="bg-white px-3 text-xs text-zinc-400">or paste text</span></div></div>
+        <textarea id="resumeText" rows="9" placeholder="Paste resume text here..." class="w-full rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
+        <p class="text-xs text-zinc-400 mt-2"><span id="resumeChar">0</span> chars</p>
+      </div>
+      <div class="bg-white rounded-2xl border border-zinc-200 p-5 sm:p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold flex items-center gap-2">💼 Job Description</h2>
+          <span class="text-xs text-zinc-500 bg-zinc-100 px-2 py-1 rounded-full">PDF / TXT or paste</span>
+        </div>
+        <label id="jdDrop" class="block border-2 border-dashed border-zinc-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/50 transition">
+          <input id="jdFile" type="file" accept=".pdf,.docx,.doc,.txt,.md" class="hidden" />
+          <div class="w-10 h-10 rounded-full bg-indigo-50 flex items-center justify-center mx-auto mb-2">📋</div>
+          <p class="text-sm font-medium">Drop JD file or <span class="text-indigo-600 underline">browse</span></p>
+          <p id="jdFileName" class="text-xs text-zinc-500 mt-1">No file chosen</p>
+        </label>
+        <div class="relative my-4"><div class="absolute inset-0 flex items-center"><div class="w-full border-t border-zinc-200"></div></div><div class="relative flex justify-center"><span class="bg-white px-3 text-xs text-zinc-400">or paste text</span></div></div>
+        <textarea id="jdText" rows="9" placeholder="Paste job description here..." class="w-full rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
+        <p class="text-xs text-zinc-400 mt-2"><span id="jdChar">0</span> chars</p>
+      </div>
+    </section>
+
+    <div id="generateBar" class="mt-6 bg-white rounded-2xl border border-zinc-200 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="text-sm">
+        <div class="font-medium">Ready for your voice screening?</div>
+        <div class="text-zinc-500 text-xs mt-0.5">Pipecat orchestrates STT → LLM → TTS via WebRTC. 6 basic questions, ~10 minutes. After each answer you’ll hear a quick feedback — then “let’s move to the next question.” Questions stay hidden until asked by voice.</div>
+      </div>
+      <button id="generateBtn" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-40 flex items-center justify-center gap-2 whitespace-nowrap">
+        <span id="genLabel">Generate & Start Voice Interview →</span>
+        <span id="genSpinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
+      </button>
+    </div>
+    <p id="generateHint" class="text-xs text-zinc-500 mt-2 text-center">Allow microphone when prompted. Tip: try “Load demo” first.</p>
+    <div class="text-center mt-1"><button id="demoBtn" class="text-xs text-indigo-600 underline">Load demo resume + JD</button></div>
+    <p id="runnerHint" class="text-xs text-center mt-3 text-zinc-500 hidden">Runner not detected — make sure <span class="mono bg-white border px-1 rounded">python server/bot.py</span> is running (WebRTC on <span id="runnerPort">7860</span>).</p>
+
+    <!-- VOICE INTERVIEW STEP -->
+    <section id="voiceStep" class="hidden max-w-3xl mx-auto">
+      <div class="bg-white rounded-2xl border border-zinc-200 p-6 sm:p-8">
+        <!-- connection bar -->
+        <div class="flex items-center justify-between mb-6">
+          <div class="flex items-center gap-3">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" id="liveDot"></span>
+            <span class="text-sm font-medium" id="liveText">Connecting…</span>
+            <span class="text-xs text-zinc-500 mono" id="timer">10:00</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="muteBtn" class="px-3 py-1.5 rounded-full bg-white border border-zinc-200 text-xs font-medium">🎙️ Mute</button>
+            <button id="endBtn" class="px-3 py-1.5 rounded-full bg-red-50 border border-red-200 text-red-700 text-xs font-medium">End interview</button>
+          </div>
+        </div>
+
+        <!-- voice orb -->
+        <div class="flex flex-col items-center py-6">
+          <div class="relative">
+            <div id="pulseA" class="absolute inset-0 rounded-full bg-indigo-100 pulse-ring hidden"></div>
+            <div id="pulseB" class="absolute inset-0 rounded-full bg-indigo-100 pulse-ring hidden" style="animation-delay:0.4s"></div>
+            <div id="orb" class="relative w-28 h-28 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white text-3xl shadow-lg">🎙️</div>
+          </div>
+          <div id="voiceState" class="mt-4 text-sm font-medium">Preparing voice pipeline…</div>
+          <div id="voiceSub" class="text-xs text-zinc-500 mt-1 text-center max-w-md">Using Pipecat: Deepgram STT → Gemini → Deepgram TTS via SmallWebRTC. Answer after you hear each question.</div>
+          <!-- visual bar -->
+          <div class="mt-4 flex items-center gap-1 h-6" id="viz">
+            <span class="w-1 h-3 bg-indigo-300 rounded-full"></span><span class="w-1 h-5 bg-indigo-400 rounded-full"></span><span class="w-1 h-2 bg-indigo-300 rounded-full"></span><span class="w-1 h-6 bg-indigo-500 rounded-full"></span><span class="w-1 h-3 bg-indigo-300 rounded-full"></span>
+          </div>
+        </div>
+
+        <!-- live transcript / feedback -->
+        <div class="mt-6 bg-zinc-50 rounded-2xl border border-zinc-200 p-4 min-h-[110px]">
+          <div class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Live</div>
+          <div id="liveTranscript" class="text-sm mt-2 leading-relaxed text-zinc-700">Connect your microphone to begin. You’ll hear: quick intro + Question 1.</div>
+          <div id="feedbackLine" class="hidden mt-3 p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-sm">
+            <span class="font-semibold text-indigo-700">Feedback:</span> <span id="feedbackText"></span>
+            <div class="text-xs text-indigo-600 mt-1 font-medium">Let’s move to the next question →</div>
+          </div>
+        </div>
+
+        <audio id="botAudio" autoplay playsinline class="hidden"></audio>
+
+        <div class="mt-6 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
+          Pipeline: <span class="mono">SmallWebRTCTransport</span> → <span class="mono">Deepgram STT</span> → <span class="mono">InterviewProcessor</span> (+ feedback) → <span class="mono">Gemini (gemma-4-26b)</span> → <span class="mono">Deepgram TTS</span> — 6 questions, feedback after each.
+        </div>
+        <div class="mt-4 flex justify-center gap-3">
+          <button id="reconnectBtn" class="hidden px-4 py-2 rounded-xl bg-white border border-zinc-200 text-sm">Reconnect</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-sm px-4 py-2 rounded-full shadow-lg hidden"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+let remaining = 600, timerIv=null, pc=null, dc=null, pcId=null;
+let runnerBase = null; // e.g. http://localhost:7860
+
+function toast(msg, ms=3000){ const t=$('toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),ms); }
+['resumeText','jdText'].forEach(id=> $(id).addEventListener('input', ()=> $(id==='resumeText'?'resumeChar':'jdChar').textContent=$(id).value.length ));
+function bindDrop(dropId,inputId,nameId){
+  const drop=$(dropId), input=$(inputId), nameEl=$(nameId);
+  ['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev,e=>{e.preventDefault(); drop.classList.add('drag-active');}));
+  ['dragleave','drop'].forEach(ev=> drop.addEventListener(ev,e=>{e.preventDefault(); drop.classList.remove('drag-active');}));
+  drop.addEventListener('drop',e=>{ if(e.dataTransfer.files[0]){ input.files=e.dataTransfer.files; nameEl.textContent=e.dataTransfer.files[0].name; }});
+  input.addEventListener('change',()=>{ if(input.files[0]) nameEl.textContent=input.files[0].name; });
+}
+bindDrop('resumeDrop','resumeFile','resumeFileName');
+bindDrop('jdDrop','jdFile','jdFileName');
+$('demoBtn').addEventListener('click',()=>{
+  $('resumeText').value=`AI Engineer Intern
+
+Skills: Python, Machine Learning, Deep Learning, Generative AI, FastAPI, Docker
+
+Projects:
+1. AI Language Tutor — Built a real-time AI language tutor using Pipecat, Deepgram, Gemini and WebRTC.
+2. Interview Agent — Built an AI-powered interview system capable of asking questions and evaluating candidate responses.`;
+  $('jdText').value=`We are looking for an AI Engineer.
+
+Required skills:
+- Strong Python programming
+- Experience with Large Language Models
+- Machine Learning fundamentals
+- API development
+- FastAPI
+- Docker`;
+  $('resumeText').dispatchEvent(new Event('input'));
+  $('jdText').dispatchEvent(new Event('input'));
+  toast('Demo data loaded');
+});
+function setStep(n){
+  const s1=$('s1'), s2=$('s2');
+  [s1,s2].forEach((el,i)=>{
+    const dot=el.querySelector('span');
+    if(i+1===n){ el.className='flex items-center gap-2 text-sm font-medium text-indigo-600'; dot.className='w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs';}
+    else if(i+1<n){ el.className='flex items-center gap-2 text-sm font-medium text-zinc-700'; dot.className='w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center text-xs';}
+    else { el.className='flex items-center gap-2 text-sm text-zinc-400'; dot.className='w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center text-xs';}
+  });
+}
+function startTimer(){
+  remaining=600; $('timer').textContent='10:00'; clearInterval(timerIv);
+  timerIv=setInterval(()=>{
+    remaining=Math.max(0,remaining-1);
+    const m=String(Math.floor(remaining/60)).padStart(2,'0'), s=String(remaining%60).padStart(2,'0');
+    $('timer').textContent=`${m}:${s}`;
+    if(remaining===0){ clearInterval(timerIv); toast('10 min up — wrapping'); }
+  },1000);
+}
+function setStatus(txt, color='zinc'){
+  $('statusText').textContent=txt;
+  const dot=$('statusDot');
+  dot.className='w-2 h-2 rounded-full ' + (color==='green'?'bg-emerald-500 animate-pulse':color==='amber'?'bg-amber-500':color==='red'?'bg-red-500':'bg-zinc-300');
+  $('liveText').textContent=txt;
+}
+async function extractTextFromFile(file){
+  if(!file) return '';
+  const ext=file.name.split('.').pop().toLowerCase();
+  if(ext==='pdf' || ext==='docx' || ext==='doc'){
+    // Use server extract endpoint for faithful parsing
+    const bases = [location.origin, 'http://localhost:8000', 'http://localhost:7860'];
+    for(const b of bases){
+      try{
+        const fd=new FormData(); fd.append('file', file);
+        const r=await fetch(`${b}/api/extract`,{method:'POST', body:fd});
+        if(r.ok){ const j=await r.json(); if(j.text) return j.text; }
+      }catch{}
+    }
+    // fallback: try read as text
+  }
+  return await file.text();
+}
+
+async function detectRunner(){
+  const candidates=['', 'http://localhost:7860', 'http://127.0.0.1:7860'];
+  for(const base of candidates){
+    try{
+      const url = base ? `${base}/api/offer` : '/api/offer';
+      // probe with OPTIONS or GET — if 405 it's there
+      const r=await fetch(url,{method:'OPTIONS'});
+      // if we get any response, assume base works
+      runnerBase = base || location.origin;
+      $('runnerPort').textContent = new URL(runnerBase, location.origin).port || '7860';
+      return runnerBase;
+    }catch{ }
+  }
+  // default to 7860
+  runnerBase='http://localhost:7860';
+  $('runnerPort').textContent='7860';
+  return runnerBase;
+}
+
+async function startVoice(){
+  const resumeFile=$('resumeFile').files[0];
+  const jdFile=$('jdFile').files[0];
+  let resumeText=$('resumeText').value.trim();
+  let jdText=$('jdText').value.trim();
+  if(resumeFile) {
+    const t=await extractTextFromFile(resumeFile);
+    if(t) resumeText=t;
+  }
+  if(jdFile){
+    const t=await extractTextFromFile(jdFile);
+    if(t) jdText=t;
+  }
+  if(!resumeText){ toast('Please upload or paste your resume'); return; }
+  if(!jdText){ toast('Please upload or paste the job description'); return; }
+
+  $('generateBtn').disabled=true; $('genLabel').textContent='Connecting…'; $('genSpinner').classList.remove('hidden');
+  setStatus('Connecting…','amber');
+  $('voiceState').textContent='Requesting microphone…';
+  $('runnerHint').classList.add('hidden');
+
+  // Also persist via FileSystem fallback (so bot without body still works)
+  try{
+    const fd=new FormData();
+    fd.append('resume_text', resumeText);
+    fd.append('jd_text', jdText);
+    await fetch('/api/interview/create',{method:'POST', body:fd}).catch(()=>{});
+    await fetch('http://localhost:8000/api/interview/create',{method:'POST', body:fd}).catch(()=>{});
+  }catch{}
+
+  await detectRunner();
+  const offerUrl = runnerBase ? `${runnerBase}/api/offer` : '/api/offer';
+  const patchUrl = offerUrl;
+
+  try{
+    // UI switch
+    $('uploadStep').classList.add('hidden');
+    $('generateBar').classList.add('hidden');
+    $('generateHint').classList.add('hidden');
+    $('demoBtn').parentElement.classList.add('hidden');
+    $('voiceStep').classList.remove('hidden');
+    setStep(2);
+    startTimer();
+    $('liveTranscript').textContent='Connecting to voice agent… allow microphone if prompted.';
+
+    pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
+    const botAudio=$('botAudio');
+    pc.ontrack = (e)=>{ botAudio.srcObject=e.streams[0]; botAudio.play().catch(()=>{}); setStatus('Live — agent speaking','green');
+      $('voiceState').textContent='Agent speaking…'; $('orb').classList.add('speaking'); $('pulseA').classList.remove('hidden'); $('pulseB').classList.remove('hidden');
+    };
+    pc.onconnectionstatechange = ()=> {
+      if(pc.connectionState==='connected'){ setStatus('Live — voice connected','green'); $('voiceState').textContent='Listening — answer the question'; $('orb').classList.remove('speaking'); }
+      if(pc.connectionState==='failed' || pc.connectionState==='disconnected'){ setStatus('Disconnected','red'); $('voiceState').textContent='Connection lost'; $('reconnectBtn').classList.remove('hidden'); $('runnerHint').classList.remove('hidden'); }
+    };
+    let pendingCandidates=[];
+    pc.onicecandidate = async (e)=>{
+      if(e.candidate && pcId){
+        const cand = { candidate:e.candidate.candidate, sdpMid:e.candidate.sdpMid, sdpMLineIndex:e.candidate.sdpMLineIndex };
+        try{ await fetch(patchUrl,{method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pc_id:pcId, candidates:[cand] }) }); }catch{}
+      } else if(e.candidate){
+        pendingCandidates.push(e.candidate);
+      }
+      if(!e.candidate){
+        // trickle complete — visual cue
+        $('viz').style.opacity='0.6';
+      }
+    };
+    pc.oniceconnectionstatechange=()=>{ if(pc.iceConnectionState==='connected') $('viz').style.opacity='1'; };
+
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    stream.getTracks().forEach(t=> pc.addTrack(t, stream));
+    $('voiceState').textContent='Microphone ready — negotiating…';
+
+    const offer = await pc.createOffer({ offerToReceiveAudio:true, offerToReceiveVideo:false });
+    await pc.setLocalDescription(offer);
+
+    const body = { resume: resumeText, job_description: jdText };
+    const res = await fetch(offerUrl,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type, request_data: body })
+    });
+    if(!res.ok){ const t=await res.text(); throw new Error(`Offer failed ${res.status}: ${t.slice(0,200)}`); }
+    const answer = await res.json();
+    // server returns {sdp, type, pc_id}
+    pcId = answer.pc_id || answer.pcId || null;
+    await pc.setRemoteDescription({type: answer.type, sdp: answer.sdp});
+
+    // flush pending candidates
+    for(const c of pendingCandidates){
+      try{ await fetch(patchUrl,{method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pc_id:pcId, candidates:[{ candidate:c.candidate, sdpMid:c.sdpMid, sdpMLineIndex:c.sdpMLineIndex }] }) }); }catch{}
+    }
+    pendingCandidates=[];
+
+    $('liveTranscript').textContent='Voice connected. You’ll hear a short intro + your first basic screening question. After each answer: quick feedback, then “let’s move to the next question.”';
+    setStatus('Live — interview in progress','green');
+    $('generateBtn').disabled=false; $('genLabel').textContent='Voice connected ✓'; $('genSpinner').classList.add('hidden');
+
+    // Poll for disconnect timer end
+    pc.addEventListener('track', ()=> setTimeout(()=> { $('orb').classList.remove('speaking'); }, 800));
+
+  }catch(e){
+    console.error(e);
+    setStatus('Failed','red');
+    $('voiceState').textContent='Connection failed';
+    $('liveTranscript').textContent = e.message + ' — is python server/bot.py running on '+ (runnerBase||'7860') +'?';
+    $('runnerHint').classList.remove('hidden');
+    toast(e.message);
+    $('generateBtn').disabled=false; $('genLabel').textContent='Generate & Start Voice Interview →'; $('genSpinner').classList.add('hidden');
+    if(pc) try{pc.close();}catch{}
+  }
+}
+
+$('generateBtn').addEventListener('click', startVoice);
+$('endBtn').addEventListener('click', ()=>{ if(pc) pc.close(); setStatus('Ended','zinc'); $('voiceState').textContent='Interview ended'; clearInterval(timerIv); toast('Interview ended'); });
+$('reconnectBtn').addEventListener('click', startVoice);
+let muted=false;
+$('muteBtn').addEventListener('click', ()=>{
+  if(!pc) return;
+  muted=!muted;
+  pc.getSenders().forEach(s=>{ if(s.track && s.track.kind==='audio') s.track.enabled=!muted; });
+  $('muteBtn').textContent = muted ? '🔇 Unmute' : '🎙️ Mute';
+  $('voiceState').textContent = muted ? 'Microphone muted' : 'Listening…';
+});
+</script>
+</body>
+</html>

@@ -58,16 +58,38 @@ class InterviewProcessor(FrameProcessor):
                 )
             )
 
+            # Grab the evaluation for the answer just submitted
+            last_evaluation = (
+                self.state.evaluations[-1]
+                if self.state.evaluations
+                else None
+            )
+            feedback_text = ""
+            if last_evaluation and last_evaluation.get("feedback"):
+                feedback_text = last_evaluation["feedback"].strip()
+                # Ensure it ends with a period for TTS
+                if feedback_text and not feedback_text.endswith("."):
+                    feedback_text += "."
+
             # Interview complete
             if next_question is None:
 
                 self.interview_finished = True
 
-                final_message = (
-                    "Thank you. The interview is now complete. "
-                    f"Your final score is "
-                    f"{self.state.final_score} out of 100."
-                )
+                if feedback_text:
+                    final_message = (
+                        f"{feedback_text} "
+                        "Thank you. That was the last question. "
+                        "The interview is now complete. "
+                        f"Your final score is "
+                        f"{self.state.final_score} out of 100."
+                    )
+                else:
+                    final_message = (
+                        "Thank you. The interview is now complete. "
+                        f"Your final score is "
+                        f"{self.state.final_score} out of 100."
+                    )
 
                 await self.push_frame(
                     TextFrame(final_message),
@@ -76,11 +98,24 @@ class InterviewProcessor(FrameProcessor):
 
                 return
 
-            # Send only the next predefined question
+            # Send small feedback + transition + next question
+            # This TextFrame flows via context_aggregator.user() -> LLM -> TTS
+            # The LLM is instructed to acknowledge briefly then ask the next question.
+            if feedback_text:
+                combined = (
+                    f"{feedback_text} "
+                    "Let's move to the next question. "
+                    f"{next_question['question']}"
+                )
+            else:
+                combined = (
+                    "Thanks for your answer. "
+                    "Let's move to the next question. "
+                    f"{next_question['question']}"
+                )
+
             await self.push_frame(
-                TextFrame(
-                    next_question["question"]
-                ),
+                TextFrame(combined),
                 direction,
             )
 
