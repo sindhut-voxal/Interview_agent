@@ -31,6 +31,10 @@ app.add_middleware(
 sessions: dict[str, InterviewState] = {}
 controller = InterviewController()
 
+# Dedupe: if same resume+JD received within 60s (e.g. client double-fire), reuse same generation
+_generation_cache: dict[str, tuple[float, InterviewState]] = {}
+_generation_locks: dict[str, asyncio.Lock] = {}
+
 CLIENT_DIR = pathlib.Path(__file__).parent.parent / "client"
 SERVER_DIR = pathlib.Path(__file__).parent
 
@@ -169,18 +173,41 @@ async def create_interview(
 
     logger.info(f"Creating interview — resume {len(resume)} chars, JD {len(jd)} chars")
 
-    state = None
-    try:
-        state = await controller.create_interview(resume=resume, job_description=jd)
-    except Exception as e:
-        logger.warning(f"LLM question generation failed, using fallback: {e}")
-        # Build a fallback InterviewState directly so UI still works without API keys
-        from interview.state import InterviewState as _IS
-        fallback_qs = _fallback_questions(resume, jd)
-        state = _IS(resume=resume, job_description=jd, questions=fallback_qs)
-    if not state or not state.questions:
-        from interview.state import InterviewState as _IS2
-        state = _IS2(resume=resume, job_description=jd, questions=_fallback_questions(resume, jd))
+    # Dedup key = hash of trimmed resume+jd
+    import hashlib, time
+    cache_key = hashlib.sha256(f"{resume}\n---\n{jd}".encode()).hexdigest()
+    now = time.time()
+    # Reuse if same request within 60s (double-click / client retry)
+    cached = _generation_cache.get(cache_key)
+    if cached and (now - cached[0] < 60):
+        logger.info("Dedup: reusing cached interview for same resume/JD within 60s")
+        state = cached[1]
+    else:
+        # Lock per key so concurrent duplicate requests coalesce to single LLM call
+        lock = _generation_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            # double-check after acquiring lock
+            cached2 = _generation_cache.get(cache_key)
+            if cached2 and (time.time() - cached2[0] < 60):
+                logger.info("Dedup (locked): reusing cached interview")
+                state = cached2[1]
+            else:
+                state = None
+                try:
+                    state = await controller.create_interview(resume=resume, job_description=jd)
+                except Exception as e:
+                    logger.warning(f"LLM question generation failed, using fallback: {e}")
+                    from interview.state import InterviewState as _IS
+                    fallback_qs = _fallback_questions(resume, jd)
+                    state = _IS(resume=resume, job_description=jd, questions=fallback_qs)
+                if not state or not state.questions:
+                    from interview.state import InterviewState as _IS2
+                    state = _IS2(resume=resume, job_description=jd, questions=_fallback_questions(resume, jd))
+                _generation_cache[cache_key] = (time.time(), state)
+                # prune old entries (>5 min)
+                for k, (ts, _) in list(_generation_cache.items()):
+                    if time.time() - ts > 300:
+                        _generation_cache.pop(k, None)
 
     session_id = str(uuid.uuid4())
     sessions[session_id] = state

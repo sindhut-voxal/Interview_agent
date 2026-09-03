@@ -268,13 +268,17 @@ async function startVoice(){
   $('voiceState').textContent='Requesting microphone…';
   $('runnerHint').classList.add('hidden');
 
-  // Also persist via FileSystem fallback (so bot without body still works)
+  // Optional: persist resume/JD so bot can fallback if offer body is lost.
+  // Fire-and-forget in background — don't block voice connection.
+  // Previously this was awaited twice (line 275-277), causing ~50s blocking + double LLM generation.
+  // Now deduped to single fire-and-forget, and voice (bot.py via /api/offer) generates the canonical questions.
   try{
     const fd=new FormData();
     fd.append('resume_text', resumeText);
     fd.append('jd_text', jdText);
-    await fetch('/api/interview/create',{method:'POST', body:fd}).catch(()=>{});
-    await fetch('http://localhost:8000/api/interview/create',{method:'POST', body:fd}).catch(()=>{});
+    // Use relative URL if served from app server (8000), else explicit 8000 for runner (7860)
+    const persistUrl = (location.port==='8000' || location.port==='') ? '/api/interview/create' : 'http://localhost:8000/api/interview/create';
+    fetch(persistUrl,{method:'POST', body:fd}).catch(()=>{});
   }catch{}
 
   await detectRunner();

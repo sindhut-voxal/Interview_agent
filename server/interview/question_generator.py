@@ -151,6 +151,9 @@ async def generate_questions(
         f"{collector.response}"
     )
 
+    if not collector.response or not collector.response.strip():
+        raise RuntimeError("Empty LLM response for question generation")
+
     questions_data = parse_json_response(
     collector.response
 )

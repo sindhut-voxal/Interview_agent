@@ -92,6 +92,29 @@ def parse_json_response(response: str):
     return json.loads(response)
 
 
+def _fallback_evaluation(question: dict, answer: str) -> dict:
+    """Heuristic fallback when LLM is unavailable or returns invalid JSON."""
+    weight = int(question.get("weight", 10))
+    ans = (answer or "").strip()
+    qid = question.get("id", 0)
+    if len(ans) < 20:
+        score = max(1, weight // 3)
+        feedback = "Thanks — try adding a bit more detail next time."
+    elif len(ans) < 80:
+        score = int(weight * 0.6)
+        feedback = "Good start — you covered the basics clearly."
+    else:
+        score = int(weight * 0.85)
+        feedback = "Nice — you explained it clearly and concisely."
+    return {
+        "question_id": qid,
+        "score": score,
+        "feedback": feedback,
+        "strengths": [],
+        "improvements": ["Could add more detail"],
+    }
+
+
 async def evaluate_answer(
     question: dict,
     answer: str,
@@ -116,7 +139,7 @@ async def evaluate_answer(
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(
-            model="Gemini-3.7-Flash",
+            model="gemini-3.6-flash",
         ),
     )
 
@@ -158,15 +181,38 @@ async def evaluate_answer(
         EndFrame()
     )
 
-    await runner.run(task)
+    try:
+        await runner.run(task)
+    except Exception as e:
+        logger.warning(f"LLM runner failed for evaluation: {e}")
+        return _fallback_evaluation(question, answer)
 
     logger.info(
         f"Raw evaluation response:\n"
         f"{collector.response}"
     )
 
-    evaluation = parse_json_response(
-        collector.response
-    )
+    if not collector.response or not collector.response.strip():
+        logger.warning("Empty LLM response for evaluation — using fallback")
+        return _fallback_evaluation(question, answer)
+
+    try:
+        evaluation = parse_json_response(
+            collector.response
+        )
+    except Exception as e:
+        logger.warning(f"Failed to parse LLM evaluation JSON: {e} — using fallback. Raw: {collector.response[:500]}")
+        return _fallback_evaluation(question, answer)
+
+    # Validate required fields, fallback if malformed
+    if not isinstance(evaluation, dict) or "score" not in evaluation or "feedback" not in evaluation:
+        logger.warning(f"Malformed evaluation JSON — using fallback: {evaluation}")
+        return _fallback_evaluation(question, answer)
+
+    # Clamp score to weight
+    try:
+        evaluation["score"] = max(0, min(int(evaluation["score"]), int(question.get("weight", 100))))
+    except Exception:
+        pass
 
     return evaluation

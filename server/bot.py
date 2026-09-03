@@ -156,7 +156,7 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(
-            model="Gemini-3.7-Flash",
+            model="gemini-3.6-flash",
             system_instruction=system_prompt,
         ),
     )

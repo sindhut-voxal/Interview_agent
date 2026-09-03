@@ -68,6 +68,33 @@ class InterviewProcessor(FrameProcessor):
         except Exception as e:
             self._processing = False
             logger.exception(f"Error in _flush_buffer: {e}")
+            # Try to recover so interview doesn't stall — generate fallback evaluation and continue
+            try:
+                # mimic fallback if controller failed before moving pointer
+                curr = self.state.get_current_question()
+                if curr is not None and len(self.state.answers) == len(self.state.evaluations):
+                    # answer was added but evaluation missing — add fallback manually
+                    from interview.scoring import calculate_final_score
+                    weight = int(curr.get("weight", 10))
+                    # simple heuristic already in answer_evaluator fallback
+                    ans_len = len(answer) if 'answer' in locals() else len(self._buffer)
+                    score = max(1, weight // 3) if ans_len < 20 else int(weight * 0.6)
+                    self.state.add_evaluation({"question_id": curr["id"], "feedback": "Thanks for your answer.", "score": score, "strengths": [], "improvements": []})
+                    self.state.move_to_next_question()
+                    if self.state.is_interview_complete():
+                        calculate_final_score(self.state)
+                        next_q = None
+                    else:
+                        next_q = self.state.get_current_question()
+                    await self._push_result(next_q)
+                elif curr is None:
+                    pass
+                else:
+                    # last attempt: push generic move
+                    nxt = self.state.get_current_question()
+                    await self._push_result(nxt)
+            except Exception as rec_e:
+                logger.error(f"Recovery also failed: {rec_e}")
 
     async def _push_result(self, next_question):
         last_evaluation = (
