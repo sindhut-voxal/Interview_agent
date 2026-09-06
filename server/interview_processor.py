@@ -3,6 +3,8 @@ import asyncio
 from loguru import logger
 
 from pipecat.frames.frames import (
+    CancelFrame,
+    EndFrame,
     InterimTranscriptionFrame,
     TextFrame,
     TranscriptionFrame,
@@ -24,7 +26,7 @@ class InterviewProcessor(FrameProcessor):
         controller: InterviewController,
         state: InterviewState,
         debounce_s: float = 3.0,
-        min_chars: int = 8,
+        min_chars: int = 18,
     ):
         super().__init__()
 
@@ -51,6 +53,11 @@ class InterviewProcessor(FrameProcessor):
             self._buffer = ""
             if not answer or len(answer) < self._min_chars:
                 logger.info(f"STT buffer below threshold ({len(answer)} chars) — ignoring: '{answer}'")
+                return
+            # Ignore filler-only answers like "Oh yeah" / "Hello?" that slip through as 8-char finals
+            _filler = answer.lower().strip(" .!?,")
+            if _filler in {"oh yeah", "oh yeah.", "yeah", "yes", "hello", "hello?", "hi", "hey", "okay", "ok", "thanks", "thank you"}:
+                logger.info(f"STT filler ignored: '{answer}'")
                 return
             logger.info(f"STT final transcript (debounced) → evaluating answer for Q{self.state.current_question_index+1}: '{answer}'")
             self._processing = True
@@ -141,6 +148,15 @@ class InterviewProcessor(FrameProcessor):
             )
         await self.push_frame(TextFrame(combined), FrameDirection.DOWNSTREAM)
 
+    async def _cancel_debounce(self):
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+            try:
+                await self._debounce_task
+            except asyncio.CancelledError:
+                pass
+            self._debounce_task = None
+
     async def process_frame(
         self,
         frame,
@@ -150,6 +166,13 @@ class InterviewProcessor(FrameProcessor):
             frame,
             direction,
         )
+
+        # Graceful shutdown: cancel pending debounce to avoid 15s task_manager timeout
+        if isinstance(frame, (CancelFrame, EndFrame)):
+            self.interview_finished = True
+            await self._cancel_debounce()
+            await self.push_frame(frame, direction)
+            return
 
         # Log interim for debugging and RESET debounce (user still speaking)
         if isinstance(frame, InterimTranscriptionFrame):

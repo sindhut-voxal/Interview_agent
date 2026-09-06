@@ -1,9 +1,20 @@
 import os
+import sys
 from dotenv import load_dotenv
 load_dotenv()
 
 #python library for logs
 from loguru import logger
+
+# Reduce spam: Deepgram TTS "unable to append audio to context: no context ID" is DEBUG but floods
+# when TTSSpeakFrame is used for the intro. Filter that single message.
+logger.remove()
+logger.add(
+    sys.stderr,
+    level="DEBUG",
+    filter=lambda record: "unable to append audio to context" not in record["message"]
+    and "Data channel not established" not in record["message"],
+)
 
 from prompt import SYSTEM_PROMPT_TEMPLATE
 
@@ -16,8 +27,8 @@ from pipecat.frames.frames import TTSSpeakFrame
 
 #connects different frame processors together
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import (PipelineParams,PipelineTask)
+from pipecat.pipeline.worker import PipelineWorker, PipelineParams
+from pipecat.workers.runner import WorkerRunner
 
 #stores context for LLM
 from pipecat.processors.aggregators.llm_context import (LLMContext)
@@ -34,11 +45,15 @@ from pipecat.transports.smallwebrtc.transport import (SmallWebRTCTransport)
 
 from pipecat.runner.types import (RunnerArguments, SmallWebRTCRunnerArguments)
 
-#Debugger for pipecat-visualise the flow of each frame
-from pipecat_whisker import WhiskerObserver
 
 from pipecat.services.tts_service import (TextAggregationMode)
 from text_normaliser import (TextNormalizerProcessor)
+
+try:
+    from pipecat_whisker import WhiskerObserver
+except ImportError:
+    WhiskerObserver = None  # type: ignore
+    logger.warning("pipecat_whisker not installed — WhiskerObserver disabled (pip install pipecat-ai-whisker)")
 
 DEFAULT_RESUME = """
 AI Engineer Intern
@@ -120,24 +135,10 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
     resume = (resume or "")[:15000]
     job_description = (job_description or "")[:15000]
 
-    # Fallback if LLM unavailable — still produce voice flow with static questions
-    try:
-        state = await controller.create_interview(
-            resume=resume,
-            job_description=job_description,
-        )
-    except Exception as e:
-        logger.warning(f"LLM generation failed, using fallback voice questions: {e}")
-        from interview.state import InterviewState
-        fallback = [
-            {"id": 1, "question": "Could you briefly introduce yourself and walk me through your background?", "skill": "Introduction", "criteria": ["Clear summary"], "weight": 15},
-            {"id": 2, "question": "You mentioned a project on your resume — could you briefly explain one you enjoyed and your role in it?", "skill": "Project Experience", "criteria": ["Explains role"], "weight": 20},
-            {"id": 3, "question": "What core skills from the job description are you most comfortable with and why?", "skill": "Role Fit", "criteria": ["Aligns with JD"], "weight": 15},
-            {"id": 4, "question": "In your own words, how would you explain a function versus a class to a junior developer?", "skill": "Fundamentals", "criteria": ["Clear definition"], "weight": 15},
-            {"id": 5, "question": "Tell me about a time you debugged a tricky issue — what was the problem and how did you solve it?", "skill": "Problem Solving", "criteria": ["Structured story"], "weight": 15},
-            {"id": 6, "question": "What would you most like to learn in your first months in this role?", "skill": "Motivation", "criteria": ["Growth mindset"], "weight": 20},
-        ]
-        state = InterviewState(resume=resume, job_description=job_description, questions=fallback)
+    state = await controller.create_interview(
+        resume=resume,
+        job_description=job_description,
+    )
 
     logger.info(f"Generated {len(state.questions)} questions")
 
@@ -149,25 +150,26 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
 
     interview_processor = InterviewProcessor(controller=controller, state=state)
 
-    stt = DeepgramSTTService(api_key=os.getenv("DEEPGRAM_API_KEY"))
+    # Deepgram STT/TTS: keepalive every 5s is built-in; use nova-3 and aura-2 defaults.
+    # TOKEN mode caused excessive frame spam; SENTENCE is more stable for voice interviews.
+    stt = DeepgramSTTService(
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        # keepalive is automatic in pipecat's DeepgramSTTService (_keepalive_handler every 5s)
+    )
 
     system_prompt = (SYSTEM_PROMPT_TEMPLATE.render())
 
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(
-            model="gemini-3.6-flash",
+            model=os.getenv("GEMINI_MODEL", "gemini-3.6-flash"),
             system_instruction=system_prompt,
         ),
     )
 
     tts = DeepgramTTSService(
-        api_key=os.getenv(
-            "DEEPGRAM_API_KEY"
-        ),
-        text_aggregation_mode=(
-            TextAggregationMode.TOKEN
-        ),
+        api_key=os.getenv("DEEPGRAM_API_KEY"),
+        text_aggregation_mode=TextAggregationMode.SENTENCE,
         settings=DeepgramTTSService.Settings(
             voice="aura-2-juno-en",
         ),
@@ -178,28 +180,34 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
     text_normalizer = (TextNormalizerProcessor())
 
     pipeline = Pipeline(
-    [
-        transport.input(),
-        stt,
-        interview_processor,
-        context_aggregator.user(),
-        llm,
-        text_normalizer,
-        tts,
-        transport.output(),
-        context_aggregator.assistant(),
-    ]
-)
-    task = PipelineTask(pipeline,params=PipelineParams(allow_interruptions=True,enable_metrics=True,enable_usage_metrics=True))
+        [
+            transport.input(),
+            stt,
+            interview_processor,
+            context_aggregator.user(),
+            llm,
+            text_normalizer,
+            tts,
+            transport.output(),
+            context_aggregator.assistant(),
+        ]
+    )
+    worker = PipelineWorker(pipeline, params=PipelineParams(allow_interruptions=True, enable_metrics=True, enable_usage_metrics=True))
 
-    task.add_observer(WhiskerObserver(task.pipeline))
-
+    if WhiskerObserver is not None:
+        try:
+            worker.add_observer(WhiskerObserver(worker.pipeline))
+            logger.info("WhiskerObserver attached at ws://localhost:9090")
+        except Exception as e:
+            logger.warning(f"Failed to attach WhiskerObserver: {e}")
+    else:
+        logger.info("WhiskerObserver skipped (not installed)")
 
     @transport.event_handler("on_client_connected")
-    async def on_client_connected(transport,client):
+    async def on_client_connected(transport, client):
         logger.info("Candidate connected")
 
-        first_question = (state.get_current_question())
+        first_question = state.get_current_question()
         if first_question is None:
             logger.error("No interview questions generated")
             return
@@ -210,16 +218,17 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
             "After each answer I'll share a quick thought and we'll move to the next question. "
             "Let's begin. "
         )
-    #this skips the LLM and speaks the text given using the TTS service.
-        await task.queue_frame(TTSSpeakFrame(intro + first_question["question"]))
+        # this skips the LLM and speaks directly via TTS; append_to_context=False avoids
+        # "unable to append audio to context" spam and keeps intro out of LLM history
+        await worker.queue_frame(TTSSpeakFrame(text=intro + first_question["question"], append_to_context=False))
 
-    @transport.event_handler(
-        "on_client_disconnected"
-    )
-    async def on_client_disconnected(transport,client):
+    @transport.event_handler("on_client_disconnected")
+    async def on_client_disconnected(transport, client):
         logger.info("Candidate disconnected")
-    runner = PipelineRunner()
-    await runner.run(task)
+
+    runner = WorkerRunner()
+    await runner.add_workers(worker)
+    await runner.run()
 
 async def bot(runner_args: RunnerArguments):
     if isinstance(runner_args,SmallWebRTCRunnerArguments):
@@ -249,24 +258,38 @@ async def bot(runner_args: RunnerArguments):
 
 
 # Serve custom UI + extract API on the runner's FastAPI app (so 7860 is self-contained)
+# Also ensure CORS handles OPTIONS for /api/offer (fixes 405 on preflight)
 try:
     from pipecat.runner.run import app as _runner_app
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse
     from fastapi import UploadFile, File
     import pathlib as _pl
+
+    # Always ensure CORS is enabled for WebRTC (even if client dir missing)
+    try:
+        _runner_app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    except Exception:
+        pass  # middleware may already be added
+
+    # Explicit OPTIONS handler for /api/offer preflight (covers case where SmallWebRTC router has no OPTIONS)
+    try:
+        from fastapi.responses import JSONResponse
+
+        @_runner_app.options("/api/offer", include_in_schema=False)
+        async def _offer_options():
+            return JSONResponse(content={}, status_code=200)
+    except Exception:
+        pass
+
     _CLIENT_DIR = _pl.Path(__file__).parent.parent / "client"
     if _CLIENT_DIR.exists() and _CLIENT_DIR.joinpath("index.html").exists():
-        try:
-            _runner_app.add_middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-            )
-        except Exception:
-            pass  # middleware may already be added
         @_runner_app.get("/app", include_in_schema=False)
         async def _serve_custom():
             return FileResponse(str(_CLIENT_DIR / "index.html"))

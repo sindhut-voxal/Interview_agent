@@ -3,45 +3,142 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Voxal — 10-min Screening Interview (Voice)</title>
+<title>InterviewPrep AI — Your AI Mock Interview Partner</title>
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  * { font-family: 'Inter', sans-serif; }
-  .mono { font-family: 'JetBrains Mono', monospace; }
-  .glass { backdrop-filter: blur(12px); }
-  .drag-active { border-color: #6366f1 !important; background: #eef2ff !important; }
-  .pulse-ring { animation: pulse-ring 2s cubic-bezier(0.455, 0.03, 0.515, 0.955) infinite; }
-  @keyframes pulse-ring { 0% { transform: scale(0.33); opacity: 1; } 80%,100% { transform: scale(1.4); opacity: 0; } }
-  .speaking { animation: speaking 1.2s ease-in-out infinite; }
-  @keyframes speaking { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
+  *{font-family:'Inter',sans-serif}
+  .mono{font-family:'JetBrains Mono',monospace}
+  .glass{backdrop-filter:blur(16px)}
+  .drag-active{border-color:#6366f1!important;background:#eef2ff!important}
+  @keyframes pulse-ring{0%{transform:scale(0.6);opacity:0.8}100%{transform:scale(1.6);opacity:0}}
+  .pulse-ring{animation:pulse-ring 2s cubic-bezier(0.455,0.03,0.515,0.955) infinite}
+  @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+  @keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+  .shimmer{position:relative;overflow:hidden}
+  .shimmer::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);transform:translateX(-100%);animation:shimmer 1.8s infinite}
+  .meet-bg{background:#202124}
+  .meet-tile{background:#3c4043;border:1px solid #5f6368}
+  .scrollbar-thin::-webkit-scrollbar{height:6px;width:6px}
+  .scrollbar-thin::-webkit-scrollbar-thumb{background:#d4d4d8;border-radius:999px}
 </style>
 </head>
-<body class="bg-[#f8f9fb] text-zinc-900 min-h-screen">
-  <header class="sticky top-0 z-40 bg-white/80 glass border-b border-zinc-200">
-    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold">V</div>
-        <div><div class="font-semibold leading-none">Voxal</div><div class="text-xs text-zinc-500">AI Screening Interview — Voice</div></div>
+<body class="bg-[#f8f9fb] text-zinc-900 min-h-screen flex flex-col">
+
+<!-- Global header (hidden on home, visible after) -->
+<header id="globalHeader" class="hidden sticky top-0 z-40 bg-white/85 glass border-b border-zinc-200">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3 cursor-pointer" onclick="showHome()">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white font-bold shadow">✦</div>
+      <div><div class="font-bold leading-none tracking-tight">InterviewPrep AI</div><div class="text-[11px] text-zinc-500 font-medium tracking-wide uppercase">AI Mock Interviews</div></div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span class="hidden sm:inline text-xs px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 font-medium">~10 min • 6 questions • voice</span>
+      <span id="headerStatus" class="text-xs px-2.5 py-1 rounded-full bg-white border border-zinc-200 flex items-center gap-1.5"><span id="statusDot" class="w-2 h-2 rounded-full bg-zinc-300"></span><span id="statusText">Idle</span></span>
+      <span id="headerTimer" class="hidden mono text-xs px-2.5 py-1 rounded-full bg-zinc-900 text-white">10:00</span>
+    </div>
+  </div>
+</header>
+
+<!-- HOME SCREEN -->
+<section id="homeScreen" class="flex-1 flex flex-col">
+  <!-- hero nav -->
+  <nav class="max-w-6xl mx-auto w-full px-4 sm:px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-xl bg-zinc-900 flex items-center justify-center text-white font-bold">✦</div>
+      <span class="font-bold tracking-tight">InterviewPrep AI</span>
+    </div>
+    <button onclick="showUpload()" class="text-sm font-medium text-zinc-600 hover:text-zinc-900">Sign in</button>
+  </nav>
+
+  <div class="flex-1 max-w-6xl mx-auto w-full px-4 sm:px-6 grid lg:grid-cols-2 gap-10 items-center py-8 sm:py-12">
+    <!-- left copy -->
+    <div>
+      <div class="inline-flex items-center gap-2 text-xs font-semibold tracking-widest uppercase text-indigo-600 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-full">New • Voice-first mock interviews</div>
+      <h1 class="mt-5 text-4xl sm:text-5xl font-extrabold tracking-tight leading-[0.95] text-zinc-900">InterviewPrep <span class="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">AI</span></h1>
+      <p class="mt-3 text-lg sm:text-xl text-zinc-600 leading-relaxed">Our AI takes your mock interview — so you walk into the real one ready.</p>
+      <p class="mt-3 text-sm text-zinc-500 max-w-xl">Upload your resume + job description. We craft personalized questions, run a realistic voice interview, and give you clear feedback. No questions leak before your turn.</p>
+
+      <div class="mt-8 flex flex-col sm:flex-row gap-3">
+        <button onclick="showUpload()" class="px-7 py-3.5 rounded-xl bg-zinc-900 text-white font-semibold shadow-lg shadow-zinc-900/10 hover:bg-zinc-800 transition flex items-center justify-center gap-2">Click to continue <span>→</span></button>
+        <button onclick="showUpload(true)" class="px-6 py-3.5 rounded-xl bg-white border border-zinc-200 font-medium hover:bg-zinc-50 flex items-center justify-center gap-2">▶ Watch how it works</button>
       </div>
-      <div class="flex items-center gap-3">
-        <span class="hidden sm:inline text-xs px-2.5 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200">~10 min • 6 questions • voice</span>
-        <span id="headerStatus" class="text-xs px-2.5 py-1 rounded-full bg-white border border-zinc-200 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-zinc-300" id="statusDot"></span><span id="statusText">Idle</span></span>
+
+      <div class="mt-6 flex items-center gap-4 text-xs text-zinc-500">
+        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>Live AI interviewer</span>
+        <span>•</span><span>Works with PDF / DOCX</span>
+        <span>•</span><span>~10 minutes</span>
+      </div>
+
+      <div class="mt-8 grid grid-cols-3 gap-3 max-w-md">
+        <div class="bg-white border border-zinc-200 rounded-2xl p-3"><div class="text-2xl font-bold">6</div><div class="text-xs text-zinc-500">tailored questions</div></div>
+        <div class="bg-white border border-zinc-200 rounded-2xl p-3"><div class="text-2xl font-bold">10<span class="text-sm font-medium"> min</span></div><div class="text-xs text-zinc-500">realistic voice</div></div>
+        <div class="bg-white border border-zinc-200 rounded-2xl p-3"><div class="text-2xl font-bold">∞</div><div class="text-xs text-zinc-500">retries, any role</div></div>
       </div>
     </div>
-  </header>
 
-  <main class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+    <!-- right mock preview -->
+    <div class="relative">
+      <div class="absolute -inset-4 bg-gradient-to-br from-indigo-100 via-violet-100 to-fuchsia-100 rounded-[2rem] blur-2xl opacity-60"></div>
+      <div class="relative bg-zinc-900 rounded-[1.5rem] p-4 sm:p-5 shadow-2xl border border-zinc-800">
+        <div class="flex items-center justify-between text-white/80 text-xs">
+          <span class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span> InterviewPrep AI • Mock Interview</span>
+          <span class="mono bg-white/10 px-2 py-1 rounded-full">10:00</span>
+        </div>
+        <div class="mt-4 grid grid-cols-2 gap-3">
+          <div class="rounded-2xl bg-[#2d2e30] border border-white/10 p-4 flex flex-col items-center justify-center aspect-[4/3]">
+            <div class="w-14 h-14 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white text-xl">✦</div>
+            <div class="mt-3 text-sm font-medium text-white">AI Interviewer</div><div class="text-[11px] text-white/50">Speaking…</div>
+            <div class="mt-3 flex gap-1"><span class="w-1 h-4 bg-white/30 rounded"></span><span class="w-1 h-7 bg-indigo-400 rounded"></span><span class="w-1 h-3 bg-white/30 rounded"></span><span class="w-1 h-6 bg-white/40 rounded"></span></div>
+          </div>
+          <div class="rounded-2xl bg-[#2d2e30] border border-white/10 p-4 flex flex-col items-center justify-center aspect-[4/3] relative overflow-hidden">
+           <div class="w-14 h-14 rounded-full bg-zinc-600 flex items-center justify-center text-white text-xl">👤</div>
+            <div class="mt-3 text-sm font-medium text-white">You</div><div class="text-[11px] text-emerald-400">● Mic on</div>
+            <span class="absolute bottom-2 right-2 w-6 h-6 rounded-full bg-zinc-700 border border-white/10 flex items-center justify-center text-[10px]">🎙️</span>
+          </div>
+        </div>
+        <div class="mt-3 rounded-xl bg-white text-zinc-900 p-3 flex items-center justify-between">
+          <div class="flex items-center gap-2 text-xs font-medium"><span class="w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center">🎙️</span> Tell me about a project you led…</div>
+          <span class="text-[10px] px-2 py-1 rounded-full bg-red-500 text-white font-semibold">● Live</span>
+        </div>
+        <div class="mt-3 flex items-center justify-center gap-3">
+          <span class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">🎙️</span>
+          <span class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">📹</span>
+          <span class="w-12 h-12 rounded-full bg-red-500 flex items-center justify-center text-white">✕</span>
+        </div>
+        <p class="text-center text-[10px] text-white/40 mt-2">Google Meet–style experience — calm, focused, real.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="border-t border-zinc-200 bg-white/60">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex flex-wrap gap-3 text-xs text-zinc-500 items-center justify-between">
+      <span>Trusted for screening practice • No question previews • Instant feedback</span>
+      <span class="flex items-center gap-2">How it works: <span class="px-2 py-1 rounded-full bg-zinc-900 text-white">1 Resume</span> <span>→</span> <span class="px-2 py-1 rounded-full bg-zinc-900 text-white">2 Interview</span> <span>→</span> <span class="px-2 py-1 rounded-full bg-zinc-900 text-white">3 Feedback</span></span>
+    </div>
+  </div>
+</section>
+
+<!-- UPLOAD SCREEN -->
+<section id="uploadScreen" class="hidden flex-1">
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
     <div id="stepper" class="flex items-center justify-center gap-2 mb-8">
-      <div id="s1" class="flex items-center gap-2 text-sm font-medium text-indigo-600"><span class="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs">1</span> Upload</div>
+      <div id="st1" class="flex items-center gap-2 text-sm font-semibold text-indigo-600"><span class="w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs">1</span> Upload</div>
       <div class="w-10 h-px bg-zinc-300"></div>
-      <div id="s2" class="flex items-center gap-2 text-sm text-zinc-400"><span class="w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center text-xs">2</span> Voice interview</div>
+      <div id="st2" class="flex items-center gap-2 text-sm text-zinc-400"><span class="w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center text-xs">2</span> Interview</div>
+      <div class="w-10 h-px bg-zinc-300"></div>
+      <div id="st3" class="flex items-center gap-2 text-sm text-zinc-400"><span class="w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center text-xs">3</span> Results</div>
     </div>
 
-    <section id="uploadStep" class="grid lg:grid-cols-2 gap-6">
-      <div class="bg-white rounded-2xl border border-zinc-200 p-5 sm:p-6">
+    <div class="text-center mb-6">
+      <h2 class="text-2xl sm:text-3xl font-bold tracking-tight">Upload your details</h2>
+      <p class="text-sm text-zinc-500 mt-1">We’ll tailor the interview to your resume and the exact role — questions stay hidden until you’re in the room.</p>
+    </div>
+
+    <div id="uploadGrid" class="grid lg:grid-cols-2 gap-6">
+      <div class="bg-white rounded-2xl border border-zinc-200 p-5 sm:p-6 shadow-sm">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold flex items-center gap-2">📄 Resume</h2>
+          <h3 class="font-semibold flex items-center gap-2">📄 Resume</h3>
           <span class="text-xs text-zinc-500 bg-zinc-100 px-2 py-1 rounded-full">PDF / DOCX / TXT</span>
         </div>
         <label id="resumeDrop" class="block border-2 border-dashed border-zinc-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/50 transition">
@@ -52,11 +149,12 @@
         </label>
         <div class="relative my-4"><div class="absolute inset-0 flex items-center"><div class="w-full border-t border-zinc-200"></div></div><div class="relative flex justify-center"><span class="bg-white px-3 text-xs text-zinc-400">or paste text</span></div></div>
         <textarea id="resumeText" rows="9" placeholder="Paste resume text here..." class="w-full rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
-        <p class="text-xs text-zinc-400 mt-2"><span id="resumeChar">0</span> chars</p>
+        <p class="text-xs text-zinc-400 mt-2"><span id="resumeChar">0</span> chars • <button id="clearResume" class="underline">clear</button></p>
       </div>
-      <div class="bg-white rounded-2xl border border-zinc-200 p-5 sm:p-6">
+
+      <div class="bg-white rounded-2xl border border-zinc-200 p-5 sm:p-6 shadow-sm">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold flex items-center gap-2">💼 Job Description</h2>
+          <h3 class="font-semibold flex items-center gap-2">💼 Job Description</h3>
           <span class="text-xs text-zinc-500 bg-zinc-100 px-2 py-1 rounded-full">PDF / TXT or paste</span>
         </div>
         <label id="jdDrop" class="block border-2 border-dashed border-zinc-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/50 transition">
@@ -67,86 +165,314 @@
         </label>
         <div class="relative my-4"><div class="absolute inset-0 flex items-center"><div class="w-full border-t border-zinc-200"></div></div><div class="relative flex justify-center"><span class="bg-white px-3 text-xs text-zinc-400">or paste text</span></div></div>
         <textarea id="jdText" rows="9" placeholder="Paste job description here..." class="w-full rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea>
-        <p class="text-xs text-zinc-400 mt-2"><span id="jdChar">0</span> chars</p>
+        <p class="text-xs text-zinc-400 mt-2"><span id="jdChar">0</span> chars • <button id="clearJD" class="underline">clear</button></p>
       </div>
-    </section>
+    </div>
 
     <div id="generateBar" class="mt-6 bg-white rounded-2xl border border-zinc-200 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
       <div class="text-sm">
-        <div class="font-medium">Ready for your voice screening?</div>
-        <div class="text-zinc-500 text-xs mt-0.5">Pipecat orchestrates STT → LLM → TTS via WebRTC. 6 basic questions, ~10 minutes. After each answer you’ll hear a quick feedback — then “let’s move to the next question.” Questions stay hidden until asked by voice.</div>
+        <div class="font-medium">Ready to personalize your interview?</div>
+        <div class="text-zinc-500 text-xs mt-0.5">We’ll generate your questions privately — you won’t see them until the interview starts.</div>
       </div>
-      <button id="generateBtn" class="w-full sm:w-auto px-6 py-3 rounded-xl bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:opacity-40 flex items-center justify-center gap-2 whitespace-nowrap">
-        <span id="genLabel">Generate & Start Voice Interview →</span>
-        <span id="genSpinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
-      </button>
+      <div class="flex items-center gap-2 w-full sm:w-auto">
+        <button id="demoBtn" class="hidden sm:inline-flex text-xs px-4 py-2 rounded-xl bg-white border border-zinc-200 font-medium">Load demo</button>
+        <button id="generateBtn" class="flex-1 sm:flex-none px-6 py-3 rounded-xl bg-zinc-900 text-white font-semibold hover:bg-zinc-800 disabled:opacity-40 flex items-center justify-center gap-2 whitespace-nowrap">
+          <span id="genLabel">Generate interview →</span><span id="genSpinner" class="hidden w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></span>
+        </button>
+      </div>
     </div>
-    <p id="generateHint" class="text-xs text-zinc-500 mt-2 text-center">Allow microphone when prompted. Tip: try “Load demo” first.</p>
-    <div class="text-center mt-1"><button id="demoBtn" class="text-xs text-indigo-600 underline">Load demo resume + JD</button></div>
-    <p id="runnerHint" class="text-xs text-center mt-3 text-zinc-500 hidden">Runner not detected — make sure <span class="mono bg-white border px-1 rounded">python server/bot.py</span> is running (WebRTC on <span id="runnerPort">7860</span>).</p>
+    <p class="text-xs text-zinc-500 mt-2 text-center">By continuing you allow microphone access for the voice interview. <button id="demoBtnMobile" class="sm:hidden text-indigo-600 underline">Try demo data</button></p>
+    <p id="runnerHint" class="text-xs text-center mt-3 text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 hidden">Voice runner not detected — make sure <span class="mono bg-white border px-1 rounded">python server/bot.py</span> is running (WebRTC on <span id="runnerPort">7860</span>).</p>
+    <div class="text-center mt-3"><button onclick="showHome()" class="text-xs text-zinc-500 underline">← Back to home</button></div>
+  </div>
+</section>
 
-    <!-- VOICE INTERVIEW STEP -->
-    <section id="voiceStep" class="hidden max-w-3xl mx-auto">
-      <div class="bg-white rounded-2xl border border-zinc-200 p-6 sm:p-8">
-        <!-- connection bar -->
-        <div class="flex items-center justify-between mb-6">
-          <div class="flex items-center gap-3">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" id="liveDot"></span>
-            <span class="text-sm font-medium" id="liveText">Connecting…</span>
-            <span class="text-xs text-zinc-500 mono" id="timer">10:00</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button id="muteBtn" class="px-3 py-1.5 rounded-full bg-white border border-zinc-200 text-xs font-medium">🎙️ Mute</button>
-            <button id="endBtn" class="px-3 py-1.5 rounded-full bg-red-50 border border-red-200 text-red-700 text-xs font-medium">End interview</button>
-          </div>
+<!-- GENERATING OVERLAY (staged progress, no questions shown) -->
+<section id="generatingScreen" class="hidden fixed inset-0 z-50 bg-white/90 glass flex items-center justify-center p-4">
+  <div class="w-full max-w-lg bg-white rounded-[1.5rem] border border-zinc-200 shadow-2xl p-6 sm:p-8">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white">✦</div>
+      <div><div class="font-semibold">Preparing your interview</div><div class="text-xs text-zinc-500">This usually takes 10–20 seconds</div></div>
+      <div class="ml-auto mono text-xs px-2 py-1 rounded-full bg-zinc-900 text-white" id="genPercent">0%</div>
+    </div>
+
+    <div class="mt-6 h-2 rounded-full bg-zinc-100 overflow-hidden">
+      <div id="genProgress" class="h-full bg-gradient-to-r from-indigo-600 to-violet-600 transition-all duration-500" style="width:0%"></div>
+    </div>
+
+    <div class="mt-6 space-y-3" id="genSteps">
+      <div data-step="1" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">1</div><div><div class="text-sm font-medium">Scanning your resume</div><div class="text-xs text-zinc-500">Extracting skills, projects & experience</div></div><span class="ml-auto text-xs">…</span></div>
+      <div data-step="2" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">2</div><div><div class="text-sm font-medium">Decoding the job description</div><div class="text-xs text-zinc-500">Aligning requirements & key competencies</div></div><span class="ml-auto text-xs">…</span></div>
+      <div data-step="3" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">3</div><div><div class="text-sm font-medium">Crafting your interview</div><div class="text-xs text-zinc-500">Writing personalized, role-specific questions</div></div><span class="ml-auto text-xs">…</span></div>
+      <div data-step="4" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">4</div><div><div class="text-sm font-medium">Finalizing the experience</div><div class="text-xs text-zinc-500">Setting up your voice interview room</div></div><span class="ml-auto text-xs">…</span></div>
+    </div>
+
+    <p class="text-xs text-zinc-500 mt-4 text-center">Your questions are being generated privately and will be revealed by voice during the interview.</p>
+    <div id="genReadyBox" class="hidden mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+      <span class="text-sm font-medium text-emerald-800">✓ Your interview is ready</span>
+      <button id="startInterviewBtn" class="px-5 py-2 rounded-xl bg-zinc-900 text-white text-sm font-semibold hover:bg-zinc-800">Start interview →</button>
+    </div>
+    <div id="genErrorBox" class="hidden mt-4 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700"></div>
+  </div>
+</section>
+
+<!-- INTERVIEW SCREEN (Google Meet clone) -->
+<section id="interviewScreen" class="hidden flex-1 flex flex-col meet-bg min-h-[calc(100vh-56px)]">
+  <!-- meet top bar -->
+  <div class="flex items-center justify-between px-4 py-3 text-white/90">
+    <div class="flex items-center gap-3">
+      <span class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">✦</span>
+      <span class="text-sm font-medium hidden sm:inline">InterviewPrep AI • Mock Interview</span>
+      <span class="text-xs px-2 py-1 rounded-full bg-white/10 border border-white/10 flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span><span id="meetStatus">Connecting…</span></span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span id="meetTimer" class="mono text-xs px-2.5 py-1 rounded-full bg-white text-zinc-900 font-semibold">10:00</span>
+      <span id="meetProgress" class="hidden sm:inline text-xs px-2 py-1 rounded-full bg-white/10 border border-white/10">Q 1 / 6</span>
+      <button onclick="endInterview()" class="text-xs px-3 py-1.5 rounded-full bg-white/10 border border-white/20">≡</button>
+    </div>
+  </div>
+
+  <!-- tiles -->
+  <div class="flex-1 px-3 sm:px-6 pb-3 grid lg:grid-cols-[1.5fr_0.9fr] gap-3 max-w-[1400px] mx-auto w-full">
+    <!-- main stage -->
+    <div class="flex flex-col gap-3">
+      <!-- AI interviewer large tile -->
+      <div class="flex-1 meet-tile rounded-2xl p-4 sm:p-6 flex flex-col items-center justify-center relative overflow-hidden min-h-[320px]">
+        <div class="absolute inset-0 bg-gradient-to-br from-indigo-600/10 via-violet-600/10 to-transparent"></div>
+        <div class="relative">
+          <div id="pulseA" class="absolute inset-0 rounded-full bg-indigo-500/20 pulse-ring hidden"></div>
+          <div id="pulseB" class="absolute inset-0 rounded-full bg-indigo-500/20 pulse-ring hidden" style="animation-delay:.4s"></div>
+          <div id="aiAvatar" class="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white text-3xl shadow-xl border-4 border-white/10">✦</div>
+          <span id="aiSpeakingBadge" class="absolute -bottom-1 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 rounded-full bg-emerald-500 text-white font-semibold hidden">Speaking</span>
         </div>
-
-        <!-- voice orb -->
-        <div class="flex flex-col items-center py-6">
-          <div class="relative">
-            <div id="pulseA" class="absolute inset-0 rounded-full bg-indigo-100 pulse-ring hidden"></div>
-            <div id="pulseB" class="absolute inset-0 rounded-full bg-indigo-100 pulse-ring hidden" style="animation-delay:0.4s"></div>
-            <div id="orb" class="relative w-28 h-28 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white text-3xl shadow-lg">🎙️</div>
-          </div>
-          <div id="voiceState" class="mt-4 text-sm font-medium">Preparing voice pipeline…</div>
-          <div id="voiceSub" class="text-xs text-zinc-500 mt-1 text-center max-w-md">Using Pipecat: Deepgram STT → Gemini → Deepgram TTS via SmallWebRTC. Answer after you hear each question.</div>
-          <!-- visual bar -->
-          <div class="mt-4 flex items-center gap-1 h-6" id="viz">
-            <span class="w-1 h-3 bg-indigo-300 rounded-full"></span><span class="w-1 h-5 bg-indigo-400 rounded-full"></span><span class="w-1 h-2 bg-indigo-300 rounded-full"></span><span class="w-1 h-6 bg-indigo-500 rounded-full"></span><span class="w-1 h-3 bg-indigo-300 rounded-full"></span>
-          </div>
+        <div class="relative mt-4 text-center">
+          <div class="text-white font-semibold">AI Interviewer</div>
+          <div id="aiSub" class="text-xs text-white/60 mt-1">Preparing your personalized questions…</div>
         </div>
-
-        <!-- live transcript / feedback -->
-        <div class="mt-6 bg-zinc-50 rounded-2xl border border-zinc-200 p-4 min-h-[110px]">
-          <div class="text-xs font-semibold text-zinc-500 uppercase tracking-wide">Live</div>
-          <div id="liveTranscript" class="text-sm mt-2 leading-relaxed text-zinc-700">Connect your microphone to begin. You’ll hear: quick intro + Question 1.</div>
-          <div id="feedbackLine" class="hidden mt-3 p-3 rounded-xl bg-indigo-50 border border-indigo-200 text-sm">
-            <span class="font-semibold text-indigo-700">Feedback:</span> <span id="feedbackText"></span>
-            <div class="text-xs text-indigo-600 mt-1 font-medium">Let’s move to the next question →</div>
+        <div id="meetViz" class="relative mt-4 flex items-center gap-1 h-8 opacity-60">
+          <span class="w-1 h-3 bg-white/40 rounded-full"></span><span class="w-1 h-5 bg-indigo-400 rounded-full"></span><span class="w-1 h-2 bg-white/30 rounded-full"></span><span class="w-1 h-6 bg-white/50 rounded-full"></span><span class="w-1 h-3 bg-white/30 rounded-full"></span><span class="w-1 h-4 bg-indigo-300 rounded-full"></span>
+        </div>
+        <!-- PiP self -->
+        <div class="absolute bottom-3 right-3 w-32 sm:w-40 aspect-video rounded-xl overflow-hidden bg-zinc-800 border border-white/20 shadow-lg flex flex-col">
+          <div class="flex-1 flex items-center justify-center bg-gradient-to-br from-zinc-700 to-zinc-800">
+           <div id="selfImg" class="w-12 h-12 rounded-full bg-zinc-600 flex items-center justify-center text-white text-lg">
+  👤
+</div>
           </div>
-        </div>
-
-        <audio id="botAudio" autoplay playsinline class="hidden"></audio>
-
-        <div class="mt-6 p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
-          Pipeline: <span class="mono">SmallWebRTCTransport</span> → <span class="mono">Deepgram STT</span> → <span class="mono">InterviewProcessor</span> (+ feedback) → <span class="mono">Gemini (gemma-4-26b)</span> → <span class="mono">Deepgram TTS</span> — 6 questions, feedback after each.
-        </div>
-        <div class="mt-4 flex justify-center gap-3">
-          <button id="reconnectBtn" class="hidden px-4 py-2 rounded-xl bg-white border border-zinc-200 text-sm">Reconnect</button>
+          <div class="px-2 py-1 bg-black/60 flex items-center justify-between text-[10px] text-white"><span>You</span><span id="selfMicIcon">🎙️</span></div>
         </div>
       </div>
-    </section>
-  </main>
 
-  <div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-sm px-4 py-2 rounded-full shadow-lg hidden"></div>
+      <!-- captions / live -->
+      <div class="meet-tile rounded-2xl p-3 sm:p-4 min-h-[120px]">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] tracking-widest uppercase font-semibold text-white/50">Live captions & feedback</span>
+          <span class="text-[11px] px-2 py-1 rounded-full bg-white/10 text-white/70 mono" id="captionHint">Listening…</span>
+        </div>
+        <div id="liveTranscript" class="text-sm leading-relaxed text-white mt-2">We’ll start with a short intro, then your first question. Speak naturally after you hear each question.</div>
+        <div id="feedbackLine" class="hidden mt-3 p-3 rounded-xl bg-indigo-500/20 border border-indigo-400/30 text-sm text-indigo-100">
+          <span class="font-semibold text-white">Feedback:</span> <span id="feedbackText"></span>
+          <div class="text-xs text-indigo-200 mt-1 font-medium">Let’s move to the next question →</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- right rail: participant + controls context -->
+    <div class="flex flex-col gap-3">
+      <div class="meet-tile rounded-2xl p-4">
+        <div class="text-xs font-semibold text-white/70 uppercase tracking-wide">Participants (2)</div>
+        <div class="mt-3 space-y-2">
+          <div class="flex items-center gap-3 p-2 rounded-xl bg-white/5 border border-white/10"><div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white text-xs">✦</div><div class="flex-1"><div class="text-sm font-medium text-white">AI Interviewer</div><div class="text-xs text-emerald-400">● Speaking</div></div><span class="text-xs text-white/40">🎙️</span></div>
+          <div class="flex items-center gap-3 p-2 rounded-xl bg-white/5 border border-white/10"><div class="w-8 h-8 rounded-full bg-zinc-600 flex items-center justify-center text-white text-sm">👤</div><div class="flex-1"><div class="text-sm font-medium text-white">You</div><div class="text-xs text-white/50">Candidate</div></div><span id="partMic" class="text-xs">🎙️</span></div>
+        </div>
+        <div class="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200">Keep answers concise (45–90s). The AI gives a quick feedback after each answer, then moves on.</div>
+      </div>
+
+      <div class="meet-tile rounded-2xl p-4">
+        <div class="text-xs font-semibold text-white/70 uppercase tracking-wide">Interview progress</div>
+        <div class="mt-3 flex items-center gap-2" id="progressDots">
+          <!-- dots injected -->
+        </div>
+        <div class="mt-3 h-1.5 rounded-full bg-white/10 overflow-hidden"><div id="progressBar" class="h-full bg-indigo-500 transition-all" style="width:0%"></div></div>
+        <div class="mt-2 text-xs text-white/50"><span id="progressText">Question 1 of 6</span> • <span id="progressTime">~10 min</span></div>
+      </div>
+
+      <div class="meet-tile rounded-2xl p-3">
+        <div class="text-xs text-white/60">Pipeline: <span class="mono text-white/80">Deepgram STT → Gemini → Deepgram TTS</span></div>
+        <div class="mt-2 flex gap-2">
+          <button id="reconnectBtn" class="hidden px-3 py-1.5 rounded-full bg-white text-zinc-900 text-xs font-semibold">Reconnect</button>
+          <span id="runnerHintMeet" class="hidden text-xs text-amber-300">Runner offline — start bot.py on :7860</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- meet bottom controls -->
+  <div class="sticky bottom-0 bg-[#202124] border-t border-white/10 px-4 py-3 flex items-center justify-center gap-3">
+    <button id="muteBtn" class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 flex items-center justify-center text-white hover:bg-white/10" title="Mute">🎙️</button>
+    <button id="camBtn" class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 flex items-center justify-center text-white hover:bg-white/10" title="Camera">📹</button>
+    <button id="captionsBtn" class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 flex items-center justify-center text-white hover:bg-white/10" title="Captions">💬</button>
+    <button id="endBtn" class="px-6 h-12 rounded-full bg-[#ea4335] text-white font-semibold hover:bg-red-600 flex items-center gap-2">✕ End</button>
+    <button class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 hidden sm:flex items-center justify-center text-white">⋯</button>
+  </div>
+  <audio id="botAudio" autoplay playsinline class="hidden"></audio>
+</section>
+
+<!-- RESULTS SCREEN -->
+<section id="resultsScreen" class="hidden flex-1 bg-[#f8f9fb]">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+    <div class="text-center">
+      <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white text-xl mx-auto">✓</div>
+      <h2 class="mt-4 text-3xl font-extrabold tracking-tight">Your interview is complete</h2>
+      <p class="text-sm text-zinc-500 mt-1">Here’s how you did — and where to improve before the real one.</p>
+    </div>
+
+    <div class="mt-8 grid sm:grid-cols-3 gap-4">
+      <div class="bg-white rounded-2xl border border-zinc-200 p-5 text-center">
+        <div class="text-xs uppercase tracking-widest font-semibold text-zinc-500">Overall score</div>
+        <div id="finalScore" class="text-4xl font-extrabold mt-1">—<span class="text-lg text-zinc-400">/100</span></div>
+        <div id="scoreLabel" class="text-xs mt-1 px-2 py-1 rounded-full bg-zinc-100 inline-block">Awaiting evaluation</div>
+      </div>
+      <div class="bg-white rounded-2xl border border-zinc-200 p-5">
+        <div class="text-xs uppercase tracking-widest font-semibold text-zinc-500">What went well</div>
+        <ul id="strengthsList" class="mt-2 text-sm space-y-1 text-zinc-700 list-disc list-inside"><li>Clear communication</li><li>Relevant examples</li></ul>
+      </div>
+      <div class="bg-white rounded-2xl border border-zinc-200 p-5">
+        <div class="text-xs uppercase tracking-widest font-semibold text-zinc-500">Focus next time</div>
+        <ul id="improvementsList" class="mt-2 text-sm space-y-1 text-zinc-700 list-disc list-inside"><li>Add more concrete metrics</li><li>Structure answers with STAR</li></ul>
+      </div>
+    </div>
+
+    <div id="evaluationsBox" class="mt-6 bg-white rounded-2xl border border-zinc-200 p-5">
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">Question feedback</h3>
+        <span class="text-xs px-2 py-1 rounded-full bg-zinc-100">6 questions</span>
+      </div>
+      <div id="evaluationsList" class="mt-4 space-y-3 text-sm"></div>
+      <p class="text-xs text-zinc-500 mt-3">Questions themselves remain private — feedback is based on your spoken answers and our evaluation.</p>
+    </div>
+
+    <div class="mt-6 flex flex-col sm:flex-row gap-3 justify-center">
+      <button onclick="restartFlow()" class="px-6 py-3 rounded-xl bg-zinc-900 text-white font-semibold hover:bg-zinc-800">Practice again →</button>
+      <button onclick="showHome()" class="px-6 py-3 rounded-xl bg-white border border-zinc-200 font-medium">Back to home</button>
+      <button id="downloadBtn" class="px-6 py-3 rounded-xl bg-white border border-zinc-200 font-medium hidden">Download report</button>
+    </div>
+
+    <div class="mt-8 p-4 rounded-2xl bg-indigo-50 border border-indigo-200">
+      <div class="text-sm font-semibold text-indigo-900">Tip for next time</div>
+      <p class="text-sm text-indigo-800/80 mt-1">Use the STAR method (Situation, Task, Action, Result) and keep each answer under 90 seconds. Try another mock with a different job description to broaden coverage.</p>
+    </div>
+  </div>
+</section>
+
+<div id="toast" class="fixed bottom-4 left-1/2 -translate-x-1/2 bg-zinc-900 text-white text-sm px-4 py-2 rounded-full shadow-lg hidden z-50"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 let remaining = 600, timerIv=null, pc=null, dc=null, pcId=null;
-let runnerBase = null; // e.g. http://localhost:7860
+let runnerBase=null;
+let sessionId=null;
+let totalQs=6;
+let currentIdx=0;
+let resumeCache='', jdCache='';
+let camOn=true;
+let isGenerating=false;
 
 function toast(msg, ms=3000){ const t=$('toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),ms); }
+
+// Navigation
+function hideAll(){
+  $('homeScreen').classList.add('hidden');
+  $('uploadScreen').classList.add('hidden');
+  $('generatingScreen').classList.add('hidden');
+  $('interviewScreen').classList.add('hidden');
+  $('resultsScreen').classList.add('hidden');
+  $('globalHeader').classList.add('hidden');
+}
+function showHome(){
+  hideAll(); $('homeScreen').classList.remove('hidden'); window.scrollTo(0,0);
+}
+function showUpload(scrollPreview=false){
+  hideAll(); $('uploadScreen').classList.remove('hidden'); $('globalHeader').classList.remove('hidden');
+  setStep(1); window.scrollTo(0,0);
+  if(scrollPreview) toast('Upload your resume to see the magic');
+}
+function showGenerating(){
+  $('generatingScreen').classList.remove('hidden');
+}
+function hideGenerating(){ $('generatingScreen').classList.add('hidden'); }
+function showInterview(){
+  hideAll(); $('interviewScreen').classList.remove('hidden'); $('globalHeader').classList.remove('hidden');
+  setStep(2); buildProgressDots(); window.scrollTo(0,0);
+}
+function showResults(score, evaluations){
+  hideAll(); $('resultsScreen').classList.remove('hidden'); $('globalHeader').classList.remove('hidden');
+  setStep(3); renderResults(score, evaluations); window.scrollTo(0,0);
+}
+function restartFlow(){
+  if(pc) try{pc.close()}catch{}
+  clearInterval(timerIv);
+  remaining=600; pc=null; pcId=null; sessionId=null; currentIdx=0;
+  showUpload();
+  // reset UI
+  $('liveTranscript').textContent='We’ll start with a short intro, then your first question. Speak naturally after you hear each question.';
+  $('feedbackLine').classList.add('hidden');
+  $('headerStatus')&&($('statusText').textContent='Idle');
+}
+function setStep(n){
+  ['st1','st2','st3'].forEach((id,i)=>{
+    const el=$(id); if(!el) return;
+    const dot=el.querySelector('span');
+    if(i+1===n){ el.className='flex items-center gap-2 text-sm font-semibold text-indigo-600'; dot.className='w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs';}
+    else if(i+1<n){ el.className='flex items-center gap-2 text-sm font-semibold text-zinc-700'; dot.className='w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center text-xs';}
+    else { el.className='flex items-center gap-2 text-sm text-zinc-400'; dot.className='w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center text-xs';}
+  });
+}
+function buildProgressDots(){
+  const c=$('progressDots'); if(!c) return; c.innerHTML='';
+  for(let i=0;i<totalQs;i++){
+    const d=document.createElement('div');
+    d.className='w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border ' + (i===currentIdx ? 'bg-indigo-600 text-white border-indigo-600' : i<currentIdx ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white/10 text-white/60 border-white/20');
+    d.textContent=i+1; c.appendChild(d);
+  }
+  const pct = totalQs? (currentIdx/totalQs*100):0;
+  $('progressBar').style.width=pct+'%';
+  $('progressText').textContent=`Question ${Math.min(currentIdx+1,totalQs)} of ${totalQs}`;
+}
+function renderResults(score, evaluations){
+  const sEl=$('finalScore');
+  if(score!=null && !isNaN(score)){
+    sEl.innerHTML=Math.round(score)+'<span class="text-lg text-zinc-400">/100</span>';
+    const label=$('scoreLabel');
+    if(score>=80) label.textContent='Strong — interview ready';
+    else if(score>=60) label.textContent='Good — polish a bit';
+    else label.textContent='Keep practicing';
+    label.className='text-xs mt-2 px-2.5 py-1 rounded-full inline-block '+(score>=80?'bg-emerald-100 text-emerald-800':score>=60?'bg-amber-100 text-amber-800':'bg-red-100 text-red-800');
+  } else {
+    sEl.innerHTML='—<span class="text-lg text-zinc-400">/100</span>';
+  }
+  const list=$('evaluationsList'); list.innerHTML='';
+  if(evaluations && evaluations.length){
+    evaluations.forEach((ev,i)=>{
+      const div=document.createElement('div');
+      div.className='p-3 rounded-xl border border-zinc-200 bg-zinc-50';
+      div.innerHTML=`<div class="flex items-center justify-between"><span class="font-medium">Question ${ev.question_id||i+1}</span><span class="text-xs px-2 py-1 rounded-full bg-white border">${ev.score!=null?ev.score+' pts':''}</span></div><div class="text-zinc-700 mt-1">${ev.feedback||'Thanks for your answer.'}</div>${ev.strengths&&ev.strengths.length?`<div class="text-xs text-emerald-700 mt-2">Strengths: ${ev.strengths.join(', ')}</div>`:''}${ev.improvements&&ev.improvements.length?`<div class="text-xs text-amber-700">Improve: ${ev.improvements.join(', ')}</div>`:''}`;
+      list.appendChild(div);
+    });
+    // aggregate strengths/improvements
+    const allS=[...new Set(evaluations.flatMap(e=>e.strengths||[]))].slice(0,4);
+    const allI=[...new Set(evaluations.flatMap(e=>e.improvements||[]))].slice(0,4);
+    if(allS.length) $('strengthsList').innerHTML=allS.map(s=>`<li>${s}</li>`).join('');
+    if(allI.length) $('improvementsList').innerHTML=allI.map(s=>`<li>${s}</li>`).join('');
+  } else {
+    list.innerHTML=`<div class="p-3 rounded-xl border border-dashed border-zinc-200 text-zinc-500 text-center">Voice interview feedback appears here after you finish. Your score will be spoken at the end and summarized here.</div>`;
+  }
+}
+
+// drag & drop + chars
 ['resumeText','jdText'].forEach(id=> $(id).addEventListener('input', ()=> $(id==='resumeText'?'resumeChar':'jdChar').textContent=$(id).value.length ));
+$('clearResume').addEventListener('click',()=>{ $('resumeText').value=''; $('resumeChar').textContent='0'; $('resumeFile').value=''; $('resumeFileName').textContent='No file chosen'; });
+$('clearJD').addEventListener('click',()=>{ $('jdText').value=''; $('jdChar').textContent='0'; $('jdFile').value=''; $('jdFileName').textContent='No file chosen'; });
 function bindDrop(dropId,inputId,nameId){
   const drop=$(dropId), input=$(inputId), nameEl=$(nameId);
   ['dragenter','dragover'].forEach(ev=> drop.addEventListener(ev,e=>{e.preventDefault(); drop.classList.add('drag-active');}));
@@ -156,56 +482,41 @@ function bindDrop(dropId,inputId,nameId){
 }
 bindDrop('resumeDrop','resumeFile','resumeFileName');
 bindDrop('jdDrop','jdFile','jdFileName');
-$('demoBtn').addEventListener('click',()=>{
-  $('resumeText').value=`AI Engineer Intern
-
-Skills: Python, Machine Learning, Deep Learning, Generative AI, FastAPI, Docker
-
-Projects:
-1. AI Language Tutor — Built a real-time AI language tutor using Pipecat, Deepgram, Gemini and WebRTC.
-2. Interview Agent — Built an AI-powered interview system capable of asking questions and evaluating candidate responses.`;
-  $('jdText').value=`We are looking for an AI Engineer.
-
-Required skills:
-- Strong Python programming
-- Experience with Large Language Models
-- Machine Learning fundamentals
-- API development
-- FastAPI
-- Docker`;
+function fillDemo(){
+  $('resumeText').value=`AI Engineer Intern\n\nSkills: Python, Machine Learning, Deep Learning, Generative AI, FastAPI, Docker\n\nProjects:\n1. AI Language Tutor — Built a real-time AI language tutor using Pipecat, Deepgram, Gemini and WebRTC.\n2. Interview Agent — Built an AI-powered interview system capable of asking questions and evaluating candidate responses.`;
+  $('jdText').value=`We are looking for an AI Engineer.\n\nRequired skills:\n- Strong Python programming\n- Experience with Large Language Models\n- Machine Learning fundamentals\n- API development\n- FastAPI\n- Docker`;
   $('resumeText').dispatchEvent(new Event('input'));
   $('jdText').dispatchEvent(new Event('input'));
   toast('Demo data loaded');
-});
-function setStep(n){
-  const s1=$('s1'), s2=$('s2');
-  [s1,s2].forEach((el,i)=>{
-    const dot=el.querySelector('span');
-    if(i+1===n){ el.className='flex items-center gap-2 text-sm font-medium text-indigo-600'; dot.className='w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs';}
-    else if(i+1<n){ el.className='flex items-center gap-2 text-sm font-medium text-zinc-700'; dot.className='w-7 h-7 rounded-full bg-zinc-900 text-white flex items-center justify-center text-xs';}
-    else { el.className='flex items-center gap-2 text-sm text-zinc-400'; dot.className='w-7 h-7 rounded-full bg-zinc-200 flex items-center justify-center text-xs';}
-  });
 }
+$('demoBtn').addEventListener('click',fillDemo);
+$('demoBtnMobile').addEventListener('click',fillDemo);
+
 function startTimer(){
-  remaining=600; $('timer').textContent='10:00'; clearInterval(timerIv);
+  remaining=600; updateTimer(); clearInterval(timerIv);
   timerIv=setInterval(()=>{
-    remaining=Math.max(0,remaining-1);
-    const m=String(Math.floor(remaining/60)).padStart(2,'0'), s=String(remaining%60).padStart(2,'0');
-    $('timer').textContent=`${m}:${s}`;
+    remaining=Math.max(0,remaining-1); updateTimer();
     if(remaining===0){ clearInterval(timerIv); toast('10 min up — wrapping'); }
   },1000);
 }
-function setStatus(txt, color='zinc'){
-  $('statusText').textContent=txt;
-  const dot=$('statusDot');
-  dot.className='w-2 h-2 rounded-full ' + (color==='green'?'bg-emerald-500 animate-pulse':color==='amber'?'bg-amber-500':color==='red'?'bg-red-500':'bg-zinc-300');
-  $('liveText').textContent=txt;
+function updateTimer(){
+  const m=String(Math.floor(remaining/60)).padStart(2,'0'), s=String(remaining%60).padStart(2,'0');
+  const txt=`${m}:${s}`;
+  if($('headerTimer')){ $('headerTimer').textContent=txt; $('headerTimer').classList.remove('hidden'); }
+  if($('meetTimer')) $('meetTimer').textContent=txt;
+  if($('timer')) $('timer').textContent=txt;
 }
+function setStatus(txt, color='zinc'){
+  if($('statusText')) $('statusText').textContent=txt;
+  const dot=$('statusDot');
+  if(dot) dot.className='w-2 h-2 rounded-full ' + (color==='green'?'bg-emerald-500 animate-pulse':color==='amber'?'bg-amber-500':color==='red'?'bg-red-500':'bg-zinc-300');
+  if($('meetStatus')) $('meetStatus').textContent=txt;
+}
+
 async function extractTextFromFile(file){
   if(!file) return '';
   const ext=file.name.split('.').pop().toLowerCase();
   if(ext==='pdf' || ext==='docx' || ext==='doc'){
-    // Use server extract endpoint for faithful parsing
     const bases = [location.origin, 'http://localhost:8000', 'http://localhost:7860'];
     for(const b of bases){
       try{
@@ -214,40 +525,46 @@ async function extractTextFromFile(file){
         if(r.ok){ const j=await r.json(); if(j.text) return j.text; }
       }catch{}
     }
-    // fallback: try read as text
   }
   return await file.text();
 }
-
 async function detectRunner(){
-  // Prefer dedicated voice runner on 7860; app server on 8000 does NOT serve /api/offer
-  const candidates=['http://localhost:7860', 'http://127.0.0.1:7860', ''];
+  // Voice runner is always on :7860 (bot.py SmallWebRTC), app.py is on :8000.
+  // Avoid OPTIONS to /api/offer on '' (app.py returns 405/503 and spams logs).
+  const candidates=['http://localhost:7860', 'http://127.0.0.1:7860'];
   for(const base of candidates){
     try{
-      const url = base ? `${base}/api/offer` : '/api/offer';
-      // OPTIONS 405 means endpoint exists (Pipecat only handles POST/PATCH), so treat any HTTP response as success
-      const r=await fetch(url,{method:'OPTIONS'});
-      runnerBase = base || location.origin;
-      $('runnerPort').textContent = new URL(runnerBase, location.origin).port || '7860';
-      // If we got 405 from origin (app.py) that is NOT the voice runner — keep trying 7860 first, but if 7860 unreachable we fell through catch
-      // Verify runner by checking it also responds to POST-like; if origin returned 405 we still want to prefer 7860 if reachable
-      if(!base && r.status===405){
-        // origin has no /api/offer — check if 7860 is actually alive via health
-        try{
-          const h=await fetch('http://localhost:7860/api/health',{method:'GET'});
-          if(h.ok){ runnerBase='http://localhost:7860'; $('runnerPort').textContent='7860'; return runnerBase; }
-        }catch{}
+      const h=await fetch(`${base}/api/health`,{method:'GET'});
+      if(h.ok){
+        runnerBase=base;
+        if($('runnerPort')) $('runnerPort').textContent='7860';
+        return runnerBase;
       }
-      return runnerBase;
-    }catch{ }
+    }catch{}
   }
-  // default to 7860
+  // fallback: assume :7860 even if health check fails (runner may not expose /api/health)
   runnerBase='http://localhost:7860';
-  $('runnerPort').textContent='7860';
+  if($('runnerPort')) $('runnerPort').textContent='7860';
   return runnerBase;
 }
 
-async function startVoice(){
+// Staged generation animation helpers
+let genAnimIv=null;
+function setGenStep(active){
+  document.querySelectorAll('#genSteps [data-step]').forEach(el=>{
+    const n=parseInt(el.dataset.step);
+    const circle=el.querySelector('div');
+    const badge=el.querySelector('span');
+    if(n<active){ el.className='flex gap-3 p-3 rounded-xl border bg-emerald-50 border-emerald-200'; circle.className='w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs'; circle.textContent='✓'; badge.textContent='done'; badge.className='ml-auto text-xs text-emerald-600 font-semibold'; el.style.opacity='1'; }
+    else if(n===active){ el.className='flex gap-3 p-3 rounded-xl border bg-indigo-50 border-indigo-200 shadow-sm'; circle.className='w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs animate-pulse'; circle.textContent=n; badge.textContent='…'; badge.className='ml-auto text-xs text-indigo-600'; el.style.opacity='1'; }
+    else { el.className='flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60'; circle.className='w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs'; circle.textContent=n; badge.textContent='…'; el.style.opacity='0.6'; }
+  });
+}
+function setGenProgress(p){ $('genProgress').style.width=p+'%'; $('genPercent').textContent=Math.round(p)+'%'; }
+
+async function handleGenerate(){
+  if(isGenerating) return;
+  isGenerating=true;
   const resumeFile=$('resumeFile').files[0];
   const jdFile=$('jdFile').files[0];
   let resumeText=$('resumeText').value.trim();
@@ -263,72 +580,137 @@ async function startVoice(){
   if(!resumeText){ toast('Please upload or paste your resume'); return; }
   if(!jdText){ toast('Please upload or paste the job description'); return; }
 
-  $('generateBtn').disabled=true; $('genLabel').textContent='Connecting…'; $('genSpinner').classList.remove('hidden');
-  setStatus('Connecting…','amber');
-  $('voiceState').textContent='Requesting microphone…';
-  $('runnerHint').classList.add('hidden');
+  resumeCache=resumeText; jdCache=jdText;
 
-  // Optional: persist resume/JD so bot can fallback if offer body is lost.
-  // Fire-and-forget in background — don't block voice connection.
-  // Previously this was awaited twice (line 275-277), causing ~50s blocking + double LLM generation.
-  // Now deduped to single fire-and-forget, and voice (bot.py via /api/offer) generates the canonical questions.
+  // show generating overlay with staged animation
+  showGenerating();
+  $('genReadyBox').classList.add('hidden');
+  $('genErrorBox').classList.add('hidden');
+  setGenStep(1); setGenProgress(8);
+  $('generateBtn').disabled=true; $('genLabel').textContent='Preparing…'; $('genSpinner').classList.remove('hidden');
+
+  // animate steps optimistically while real request runs
+  let pct=8, step=1;
+  clearInterval(genAnimIv);
+  genAnimIv=setInterval(()=>{
+    pct=Math.min(88, pct + Math.random()*6);
+    setGenProgress(pct);
+    if(pct>28 && step===1){ step=2; setGenStep(2); }
+    else if(pct>52 && step===2){ step=3; setGenStep(3); }
+    else if(pct>74 && step===3){ step=4; setGenStep(4); }
+  }, 700);
+
   try{
+    // persist for bot fallback + create interview (questions not shown)
     const fd=new FormData();
     fd.append('resume_text', resumeText);
     fd.append('jd_text', jdText);
-    // Use relative URL if served from app server (8000), else explicit 8000 for runner (7860)
     const persistUrl = (location.port==='8000' || location.port==='') ? '/api/interview/create' : 'http://localhost:8000/api/interview/create';
-    fetch(persistUrl,{method:'POST', body:fd}).catch(()=>{});
-  }catch{}
+    const r=await fetch(persistUrl,{method:'POST', body:fd});
+    if(!r.ok){ const t=await r.text(); throw new Error(t.slice(0,300)); }
+    const data=await r.json();
+    sessionId=data.session_id;
+    totalQs=data.total || (data.questions?data.questions.length:6);
+    // do NOT display questions — persistUrl already wrote latest_interview.json for bot fallback
+
+    clearInterval(genAnimIv);
+    setGenStep(5); setGenProgress(100);
+    // mark all done
+    document.querySelectorAll('#genSteps [data-step]').forEach(el=>{
+      el.className='flex gap-3 p-3 rounded-xl border bg-emerald-50 border-emerald-200'; el.style.opacity='1';
+      el.querySelector('div').className='w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs'; el.querySelector('div').textContent='✓';
+      el.querySelector('span').textContent='done'; el.querySelector('span').className='ml-auto text-xs text-emerald-600 font-semibold';
+    });
+    $('genReadyBox').classList.remove('hidden');
+    $('generateBtn').disabled=false; $('genLabel').textContent='Generate interview →'; $('genSpinner').classList.add('hidden');
+    toast('Interview ready — click Start interview');
+  }catch(e){
+    clearInterval(genAnimIv);
+    $('genErrorBox').textContent='Could not prepare interview: '+ e.message;
+    $('genErrorBox').classList.remove('hidden');
+    $('generateBtn').disabled=false; $('genLabel').textContent='Generate interview →'; $('genSpinner').classList.add('hidden');
+    setGenProgress(100);
+  } finally {
+    isGenerating=false;
+  }
+}
+
+$('generateBtn').addEventListener('click', handleGenerate);
+$('startInterviewBtn').addEventListener('click', async ()=>{
+  hideGenerating();
+  await startVoiceWithCache();
+});
+
+async function startVoiceWithCache(){
+  if(!resumeCache || !jdCache){
+    // fallback read again
+    let rt=$('resumeText').value.trim(), jt=$('jdText').value.trim();
+    if(!rt || !jt){ toast('Resume / JD missing'); showUpload(); return; }
+    resumeCache=rt; jdCache=jt;
+  }
+  showInterview();
+  setStatus('Connecting…','amber');
+  const sub=$('aiSub'); if(sub) sub.textContent='Requesting microphone…';
+  $('runnerHint').classList.add('hidden');
+  const rh2=$('runnerHintMeet'); if(rh2) rh2.classList.add('hidden');
 
   await detectRunner();
   const offerUrl = runnerBase ? `${runnerBase}/api/offer` : '/api/offer';
   const patchUrl = offerUrl;
 
   try{
-    // UI switch
-    $('uploadStep').classList.add('hidden');
-    $('generateBar').classList.add('hidden');
-    $('generateHint').classList.add('hidden');
-    $('demoBtn').parentElement.classList.add('hidden');
-    $('voiceStep').classList.remove('hidden');
-    setStep(2);
     startTimer();
+    currentIdx=0; buildProgressDots();
     $('liveTranscript').textContent='Connecting to voice agent… allow microphone if prompted.';
+    $('meetStatus').textContent='Connecting…';
 
     pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
+    // FIX: create data channel before offer — pipecat SmallWebRTC expects client-initiated channel
+    // Without this, server logs "Data channel not established within 10s" and RTVI msgs are dropped
+    try{
+      dc = pc.createDataChannel("rtvi", {ordered:true});
+      dc.onopen = ()=> console.log("[webrtc] data channel open");
+      dc.onclose = ()=> console.log("[webrtc] data channel closed");
+      dc.onmessage = (e)=> {
+        try{ const m=JSON.parse(e.data); console.log("[webrtc] dc message", m); }
+        catch{ console.log("[webrtc] dc raw", e.data); }
+        if(e.data && e.data.startsWith && e.data.startsWith("ping")){ /* keepalive */ }
+      };
+      dc.onerror = (e)=> console.warn("[webrtc] dc error", e);
+    }catch(e){ console.warn("createDataChannel failed", e); }
     const botAudio=$('botAudio');
     pc.ontrack = (e)=>{ botAudio.srcObject=e.streams[0]; botAudio.play().catch(()=>{}); setStatus('Live — agent speaking','green');
-      $('voiceState').textContent='Agent speaking…'; $('orb').classList.add('speaking'); $('pulseA').classList.remove('hidden'); $('pulseB').classList.remove('hidden');
+      if($('aiSpeakingBadge')) $('aiSpeakingBadge').classList.remove('hidden');
+      if($('aiAvatar')) $('aiAvatar').classList.add('ring-4','ring-indigo-400/30');
+      const pulseA=$('pulseA'), pulseB=$('pulseB'); if(pulseA) pulseA.classList.remove('hidden'); if(pulseB) pulseB.classList.remove('hidden');
+      if($('captionHint')) $('captionHint').textContent='Agent speaking';
     };
     pc.onconnectionstatechange = ()=> {
-      if(pc.connectionState==='connected'){ setStatus('Live — voice connected','green'); $('voiceState').textContent='Listening — answer the question'; $('orb').classList.remove('speaking'); }
-      if(pc.connectionState==='failed' || pc.connectionState==='disconnected'){ setStatus('Disconnected','red'); $('voiceState').textContent='Connection lost'; $('reconnectBtn').classList.remove('hidden'); $('runnerHint').classList.remove('hidden'); }
+      if(pc.connectionState==='connected'){ setStatus('Live — interview in progress','green'); if($('aiSub')) $('aiSub').textContent='Listening — answer the question'; if($('captionHint')) $('captionHint').textContent='Listening'; if($('aiAvatar')) $('aiAvatar').classList.remove('ring-4'); }
+      if(pc.connectionState==='failed' || pc.connectionState==='disconnected'){ setStatus('Disconnected','red'); if($('aiSub')) $('aiSub').textContent='Connection lost'; $('reconnectBtn').classList.remove('hidden'); $('runnerHint').classList.remove('hidden'); const rh=$('runnerHintMeet'); if(rh) rh.classList.remove('hidden'); }
     };
     let pendingCandidates=[];
     pc.onicecandidate = async (e)=>{
       if(e.candidate && pcId){
-        // Pipecat expects snake_case sdp_mid / sdp_mline_index (422 fix), keep camel for compat
         const cand = { candidate:e.candidate.candidate, sdp_mid:e.candidate.sdpMid, sdp_mline_index:e.candidate.sdpMLineIndex, sdpMid:e.candidate.sdpMid, sdpMLineIndex:e.candidate.sdpMLineIndex };
         try{ await fetch(patchUrl,{method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pc_id:pcId, candidates:[cand] }) }); }catch{}
       } else if(e.candidate){
         pendingCandidates.push(e.candidate);
       }
       if(!e.candidate){
-        // trickle complete — visual cue
-        $('viz').style.opacity='0.6';
+        const v=$('meetViz'); if(v) v.style.opacity='0.6';
       }
     };
-    pc.oniceconnectionstatechange=()=>{ if(pc.iceConnectionState==='connected') $('viz').style.opacity='1'; };
+    pc.oniceconnectionstatechange=()=>{ if(pc.iceConnectionState==='connected'){ const v=$('meetViz'); if(v) v.style.opacity='1'; } };
 
     const stream = await navigator.mediaDevices.getUserMedia({audio:true});
     stream.getTracks().forEach(t=> pc.addTrack(t, stream));
-    $('voiceState').textContent='Microphone ready — negotiating…';
+    if($('aiSub')) $('aiSub').textContent='Microphone ready — negotiating…';
 
     const offer = await pc.createOffer({ offerToReceiveAudio:true, offerToReceiveVideo:false });
     await pc.setLocalDescription(offer);
 
-    const body = { resume: resumeText, job_description: jdText };
+    const body = { resume: resumeCache, job_description: jdCache };
     const res = await fetch(offerUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -336,46 +718,97 @@ async function startVoice(){
     });
     if(!res.ok){ const t=await res.text(); throw new Error(`Offer failed ${res.status}: ${t.slice(0,200)}`); }
     const answer = await res.json();
-    // server returns {sdp, type, pc_id}
     pcId = answer.pc_id || answer.pcId || null;
     await pc.setRemoteDescription({type: answer.type, sdp: answer.sdp});
 
-    // flush pending candidates
     for(const c of pendingCandidates){
       try{ await fetch(patchUrl,{method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ pc_id:pcId, candidates:[{ candidate:c.candidate, sdp_mid:c.sdpMid, sdp_mline_index:c.sdpMLineIndex, sdpMid:c.sdpMid, sdpMLineIndex:c.sdpMLineIndex }] }) }); }catch{}
     }
     pendingCandidates=[];
 
-    $('liveTranscript').textContent='Voice connected. You’ll hear a short intro + your first basic screening question. After each answer: quick feedback, then “let’s move to the next question.”';
+    $('liveTranscript').textContent='Voice connected. You’ll hear a short intro + your first screening question. After each answer: quick feedback, then “let’s move to the next question.”';
     setStatus('Live — interview in progress','green');
-    $('generateBtn').disabled=false; $('genLabel').textContent='Voice connected ✓'; $('genSpinner').classList.add('hidden');
+    if($('aiSub')) $('aiSub').textContent='Interview in progress — speak after each question';
+    // simulate progress advancing on track events (real feedback moves via InterviewProcessor voice)
+    pc.addEventListener('track', ()=> setTimeout(()=> { const a=$('aiAvatar'); if(a) a.classList.remove('ring-4'); const b=$('aiSpeakingBadge'); if(b) b.classList.add('hidden'); }, 800));
 
-    // Poll for disconnect timer end
-    pc.addEventListener('track', ()=> setTimeout(()=> { $('orb').classList.remove('speaking'); }, 800));
+    // Poll for interview end: when pipeline ends, connection closes → show results after a delay
+    // Also try to fetch evaluations from REST if available
+    let ended=false;
+    const checkEnd=()=>{
+      if(ended) return;
+      if(pc.connectionState==='closed' || pc.connectionState==='failed'){
+        ended=true;
+        setTimeout(async ()=>{
+          let score=null, evals=null;
+          if(sessionId){
+            try{
+              const r=await fetch(`/api/interview/${sessionId}`);
+              if(r.ok){ const j=await r.json(); score=j.final_score; evals=j.evaluations; }
+            }catch{}
+          }
+          showResults(score, evals);
+        }, 800);
+      }
+    };
+    pc.addEventListener('connectionstatechange', checkEnd);
+    // fallback: after 10 min show results
+    setTimeout(checkEnd, 610*1000);
 
   }catch(e){
     console.error(e);
     setStatus('Failed','red');
-    $('voiceState').textContent='Connection failed';
+    if($('aiSub')) $('aiSub').textContent='Connection failed';
     $('liveTranscript').textContent = e.message + ' — is python server/bot.py running on '+ (runnerBase||'7860') +'?';
-    $('runnerHint').classList.remove('hidden');
+    $('runnerHint').classList.remove('hidden'); const rh=$('runnerHintMeet'); if(rh) rh.classList.remove('hidden');
     toast(e.message);
-    $('generateBtn').disabled=false; $('genLabel').textContent='Generate & Start Voice Interview →'; $('genSpinner').classList.add('hidden');
     if(pc) try{pc.close();}catch{}
   }
 }
 
-$('generateBtn').addEventListener('click', startVoice);
-$('endBtn').addEventListener('click', ()=>{ if(pc) pc.close(); setStatus('Ended','zinc'); $('voiceState').textContent='Interview ended'; clearInterval(timerIv); toast('Interview ended'); });
-$('reconnectBtn').addEventListener('click', startVoice);
+function endInterview(){
+  if(pc) try{pc.close()}catch{};
+  setStatus('Ended','zinc'); if($('aiSub')) $('aiSub').textContent='Interview ended'; clearInterval(timerIv);
+  // try to fetch final results
+  (async()=>{
+    let score=null, evals=null;
+    if(sessionId){
+      try{ const r=await fetch(`/api/interview/${sessionId}`); if(r.ok){ const j=await r.json(); score=j.final_score; evals=j.evaluations; } }catch{}
+    }
+    showResults(score, evals);
+    toast('Interview ended');
+  })();
+}
+$('endBtn').addEventListener('click', endInterview);
+$('reconnectBtn').addEventListener('click', startVoiceWithCache);
 let muted=false;
 $('muteBtn').addEventListener('click', ()=>{
   if(!pc) return;
   muted=!muted;
   pc.getSenders().forEach(s=>{ if(s.track && s.track.kind==='audio') s.track.enabled=!muted; });
-  $('muteBtn').textContent = muted ? '🔇 Unmute' : '🎙️ Mute';
-  $('voiceState').textContent = muted ? 'Microphone muted' : 'Listening…';
+  $('muteBtn').textContent = muted ? '🔇' : '🎙️';
+  $('muteBtn').classList.toggle('bg-red-500', muted);
+  $('muteBtn').classList.toggle('bg-[#3c4043]', !muted);
+  const mic=$('selfMicIcon'); if(mic) mic.textContent= muted?'🔇':'🎙️';
+  const part=$('partMic'); if(part) part.textContent= muted?'🔇':'🎙️';
+  if($('aiSub')) $('aiSub').textContent = muted ? 'Microphone muted' : 'Listening…';
+  if($('captionHint')) $('captionHint').textContent = muted ? 'Muted' : 'Listening…';
 });
+$('camBtn').addEventListener('click', ()=>{
+  camOn=!camOn;
+  $('camBtn').classList.toggle('bg-red-500', !camOn);
+  $('camBtn').classList.toggle('bg-[#3c4043]', camOn);
+  $('camBtn').textContent = camOn ? '📹' : '🚫';
+  toast(camOn ? 'Camera on' : 'Camera off');
+});
+$('captionsBtn').addEventListener('click', ()=>{
+  const cap=$('liveTranscript').parentElement;
+  cap.classList.toggle('hidden');
+  toast(cap.classList.contains('hidden') ? 'Captions hidden' : 'Captions shown');
+});
+
+// expose for inline handlers
+window.showHome=showHome; window.showUpload=showUpload; window.restartFlow=restartFlow; window.endInterview=endInterview;
 </script>
 </body>
 </html>

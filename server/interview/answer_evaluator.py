@@ -13,8 +13,8 @@ from pipecat.frames.frames import (
 )
 
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.worker import PipelineWorker
+from pipecat.workers.runner import WorkerRunner
 
 from pipecat.processors.frame_processor import (
     FrameDirection,
@@ -92,127 +92,52 @@ def parse_json_response(response: str):
     return json.loads(response)
 
 
-def _fallback_evaluation(question: dict, answer: str) -> dict:
-    """Heuristic fallback when LLM is unavailable or returns invalid JSON."""
-    weight = int(question.get("weight", 10))
-    ans = (answer or "").strip()
-    qid = question.get("id", 0)
-    if len(ans) < 20:
-        score = max(1, weight // 3)
-        feedback = "Thanks — try adding a bit more detail next time."
-    elif len(ans) < 80:
-        score = int(weight * 0.6)
-        feedback = "Good start — you covered the basics clearly."
-    else:
-        score = int(weight * 0.85)
-        feedback = "Nice — you explained it clearly and concisely."
-    return {
-        "question_id": qid,
-        "score": score,
-        "feedback": feedback,
-        "strengths": [],
-        "improvements": ["Could add more detail"],
-    }
+async def _evaluate_once(prompt: str, model: str, timeout: int = 20) -> str:
+    llm = GoogleLLMService(
+        api_key=os.getenv("GOOGLE_API_KEY"),
+        settings=GoogleLLMService.Settings(model=model),
+    )
+    collector = ResponseCollector()
+    pipeline = Pipeline([llm, collector])
+    worker = PipelineWorker(pipeline)
+    runner = WorkerRunner()
+    context = LLMContext(messages=[{"role": "user", "content": prompt}])
+    await worker.queue_frame(LLMContextFrame(context=context))
+    await worker.queue_frame(EndFrame())
+    await runner.add_workers(worker)
+    await asyncio.wait_for(runner.run(), timeout=timeout)
+    if not collector.response or not collector.response.strip():
+        raise RuntimeError("Empty LLM response")
+    return collector.response
 
 
 async def evaluate_answer(
     question: dict,
     answer: str,
 ) -> dict:
-
-    logger.info(
-        "Starting answer evaluation"
-    )
-
+    logger.info("Starting answer evaluation")
     prompt = ANSWER_EVALUATION_PROMPT.format(
         question_id=question["id"],
         question=question["question"],
         skill=question["skill"],
-        criteria=json.dumps(
-            question["criteria"],
-            indent=2,
-        ),
+        criteria=json.dumps(question["criteria"], indent=2),
         weight=question["weight"],
         answer=answer,
     )
+    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
-    llm = GoogleLLMService(
-        api_key=os.getenv("GOOGLE_API_KEY"),
-        settings=GoogleLLMService.Settings(
-            model="gemini-3.6-flash",
-        ),
-    )
+    logger.info(f"Evaluate model={model}")
+    raw = await _evaluate_once(prompt, model, timeout=20)
 
-    collector = ResponseCollector()
+    logger.info(f"Raw evaluation response:\n{raw}")
 
-    pipeline = Pipeline(
-        [
-            llm,
-            collector,
-        ]
-    )
+    evaluation = parse_json_response(raw)
 
-    task = PipelineTask(
-        pipeline
-    )
-
-    runner = PipelineRunner()
-
-    context = LLMContext(
-        messages=[
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ]
-    )
-
-    logger.info(
-        "Sending evaluation prompt to LLM"
-    )
-
-    await task.queue_frame(
-        LLMContextFrame(
-            context=context
-        )
-    )
-
-    await task.queue_frame(
-        EndFrame()
-    )
-
-    try:
-        await runner.run(task)
-    except Exception as e:
-        logger.warning(f"LLM runner failed for evaluation: {e}")
-        return _fallback_evaluation(question, answer)
-
-    logger.info(
-        f"Raw evaluation response:\n"
-        f"{collector.response}"
-    )
-
-    if not collector.response or not collector.response.strip():
-        logger.warning("Empty LLM response for evaluation — using fallback")
-        return _fallback_evaluation(question, answer)
-
-    try:
-        evaluation = parse_json_response(
-            collector.response
-        )
-    except Exception as e:
-        logger.warning(f"Failed to parse LLM evaluation JSON: {e} — using fallback. Raw: {collector.response[:500]}")
-        return _fallback_evaluation(question, answer)
-
-    # Validate required fields, fallback if malformed
     if not isinstance(evaluation, dict) or "score" not in evaluation or "feedback" not in evaluation:
-        logger.warning(f"Malformed evaluation JSON — using fallback: {evaluation}")
-        return _fallback_evaluation(question, answer)
+        raise ValueError(f"Malformed evaluation JSON: {evaluation}")
 
-    # Clamp score to weight
     try:
         evaluation["score"] = max(0, min(int(evaluation["score"]), int(question.get("weight", 100))))
     except Exception:
         pass
-
     return evaluation

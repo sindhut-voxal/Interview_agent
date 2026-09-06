@@ -72,26 +72,6 @@ async def extract_text_from_upload(file: UploadFile) -> str:
         return data.decode("utf-8", errors="ignore")
 
 
-def _fallback_questions(resume: str, jd: str):
-    """Basic screening fallback when LLM is unavailable — always returns 6 short questions."""
-    return [
-        {"id": 1, "question": "Could you briefly introduce yourself and walk me through your background?", "skill": "Introduction", "criteria": ["Clear summary", "Relevant experience mentioned"], "weight": 15},
-        {"id": 2, "question": f"Your resume mentions projects with {resume[:60].split(',')[0] if resume else 'your stack'} — can you briefly explain one project you enjoyed working on and your role in it?", "skill": "Project Experience", "criteria": ["Explains role clearly", "Shows understanding"], "weight": 20},
-        {"id": 3, "question": "What are the core responsibilities you're most comfortable with for this role, and why?", "skill": "Role Fit", "criteria": ["Aligns with JD", "Shows motivation"], "weight": 15},
-        {"id": 4, "question": "In Python (or your primary language), how would you explain a function versus a class to a junior developer?", "skill": "Fundamentals", "criteria": ["Clear definition", "Simple example"], "weight": 15},
-        {"id": 5, "question": "Tell me about a time you debugged a tricky issue — what was the problem and how did you solve it?", "skill": "Problem Solving", "criteria": ["Structured story", "Shows approach"], "weight": 15},
-        {"id": 6, "question": "What are you hoping to learn or grow in during your first few months in this role?", "skill": "Motivation / Culture", "criteria": ["Shows curiosity", "Growth mindset"], "weight": 20},
-    ]
-
-def _fallback_feedback(answer: str, weight: int):
-    ans = answer.strip()
-    if len(ans) < 20:
-        return {"feedback": "Thanks — try adding a bit more detail next time.", "score": max(1, weight // 3)}
-    if len(ans) < 80:
-        return {"feedback": "Good start — you covered the basics clearly.", "score": int(weight * 0.6)}
-    return {"feedback": "Nice — you explained it clearly and concisely.", "score": int(weight * 0.85)}
-
-
 def _write_latest_interview(resume: str, jd: str):
     """Write latest resume/JD so the Pipecat bot (voice mode) can pick it up."""
     import tempfile
@@ -192,17 +172,9 @@ async def create_interview(
                 logger.info("Dedup (locked): reusing cached interview")
                 state = cached2[1]
             else:
-                state = None
-                try:
-                    state = await controller.create_interview(resume=resume, job_description=jd)
-                except Exception as e:
-                    logger.warning(f"LLM question generation failed, using fallback: {e}")
-                    from interview.state import InterviewState as _IS
-                    fallback_qs = _fallback_questions(resume, jd)
-                    state = _IS(resume=resume, job_description=jd, questions=fallback_qs)
+                state = await controller.create_interview(resume=resume, job_description=jd)
                 if not state or not state.questions:
-                    from interview.state import InterviewState as _IS2
-                    state = _IS2(resume=resume, job_description=jd, questions=_fallback_questions(resume, jd))
+                    raise HTTPException(500, "LLM failed to generate interview questions")
                 _generation_cache[cache_key] = (time.time(), state)
                 # prune old entries (>5 min)
                 for k, (ts, _) in list(_generation_cache.items()):
@@ -247,26 +219,7 @@ async def submit_answer(session_id: str, payload: dict):
             "message": "Interview already complete.",
         }
 
-    # Evaluate + advance — controller does scoring + moving pointer
-    # Fallback if LLM evaluator fails (e.g. missing API key)
-    next_q = None
-    try:
-        next_q = await controller.submit_answer(state=state, answer=answer)
-    except Exception as e:
-        logger.warning(f"LLM evaluation failed, using fallback: {e}")
-        # Manual fallback: mimic what controller does but locally
-        curr = state.get_current_question()
-        if curr is not None:
-            fb = _fallback_feedback(answer, int(curr.get("weight", 15)))
-            state.add_answer(answer)
-            state.add_evaluation({"question_id": curr["id"], "feedback": fb["feedback"], "score": fb["score"], "strengths": [], "improvements": []})
-            state.move_to_next_question()
-            if state.is_interview_complete():
-                from interview.scoring import calculate_final_score
-                calculate_final_score(state)
-                next_q = None
-            else:
-                next_q = state.get_current_question()
+    next_q = await controller.submit_answer(state=state, answer=answer)
 
     last_eval = state.evaluations[-1] if state.evaluations else None
     feedback = (last_eval or {}).get("feedback", "")
