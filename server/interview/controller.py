@@ -1,3 +1,8 @@
+import asyncio
+import json
+import os
+from loguru import logger
+
 from interview.state import InterviewState
 from interview.question_generator import generate_questions
 from interview.answer_evaluator import evaluate_answer
@@ -24,46 +29,89 @@ class InterviewController:
             questions=questions,
         )
 
-
     async def submit_answer(
-    self,
-    state: InterviewState,
-    answer: str,
-):
-
-    # 1. Get current question
-        current_question = (
-            state.get_current_question()
-        )
-
+        self,
+        state: InterviewState,
+        answer: str,
+    ):
+        """REAL-TIME path: store answer and advance, no LLM eval."""
+        current_question = state.get_current_question()
         if current_question is None:
             return None
-
-        # 2. Store answer
         state.add_answer(answer)
-
-        # 3. Evaluate answer
-        evaluation = await evaluate_answer(
-            question=current_question,
-            answer=answer,
-        )
-
-        # 4. Store evaluation
-        state.add_evaluation(
-            evaluation
-        )
-
-        # 5. Move to next question
         state.move_to_next_question()
-
-        # 6. Check whether interview is complete
         if state.is_interview_complete():
-
-            calculate_final_score(
-                state
-            )
-
             return None
-
-        # 7. Return next question
         return state.get_current_question()
+
+    async def submit_answer_with_eval(
+        self,
+        state: InterviewState,
+        answer: str,
+    ):
+        """Legacy path with per-answer LLM eval (for offline tests)."""
+        current_question = state.get_current_question()
+        if current_question is None:
+            return None
+        state.add_answer(answer)
+        evaluation = await evaluate_answer(question=current_question, answer=answer)
+        state.add_evaluation(evaluation)
+        state.move_to_next_question()
+        if state.is_interview_complete():
+            calculate_final_score(state)
+            return None
+        return state.get_current_question()
+
+    async def evaluate_interview(self, state: InterviewState, concurrency: int = 3) -> dict:
+        """POST-INTERVIEW batch evaluation. Runs after is_complete."""
+        if not state.answers:
+            return {"evaluations": [], "final_score": 0}
+        q_by_id = {q["id"]: q for q in state.questions}
+        sem = asyncio.Semaphore(concurrency)
+
+        async def eval_one(index: int, ans_entry: dict):
+            async with sem:
+                qid = ans_entry.get("question_id")
+                q = q_by_id.get(qid)
+                if q is None:
+                    q = state.questions[index] if index < len(state.questions) else None
+                if q is None:
+                    return {"question_id": qid, "score": None, "feedback": "Evaluation unavailable.", "strengths": [], "improvements": [], "error": "No matching question"}
+                try:
+                    ev = await evaluate_answer(question=q, answer=ans_entry.get("answer", ""))
+                    ev["question_id"] = q["id"]
+                    return ev
+                except Exception as e:
+                    logger.warning(f"eval failed for Q{qid or q['id']}: {e}")
+                    return {"question_id": q["id"], "score": None, "feedback": "Evaluation unavailable.", "strengths": [], "improvements": [], "error": str(e)}
+
+        results = await asyncio.gather(*(eval_one(i, a) for i, a in enumerate(state.answers)))
+        state.evaluations = list(results)
+        # Only sum non-None scores; None means evaluation failed and should not contribute fake score
+        # For final_score, treat None as 0 but mark report incomplete via caller
+        # Calculate final using scoring helper that handles None -> 0
+        for ev in state.evaluations:
+            if ev.get("score") is None:
+                ev["score"] = 0
+        total = calculate_final_score(state)
+        strengths = []
+        improvements = []
+        for ev in results:
+            strengths.extend(ev.get("strengths", []))
+            improvements.extend(ev.get("improvements", []))
+
+        def dedupe(seq):
+            seen = set()
+            out = []
+            for x in seq:
+                if x not in seen:
+                    seen.add(x)
+                    out.append(x)
+            return out
+
+        return {
+            "evaluations": state.evaluations,
+            "final_score": total,
+            "strengths": dedupe(strengths)[:5],
+            "improvements": dedupe(improvements)[:5],
+        }

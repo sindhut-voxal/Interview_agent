@@ -35,13 +35,17 @@ Rules:
 
 For every question provide:
 
-- id
+- id (unique integer 1..6)
 - question
 - skill
-- criteria
-- weight
+- criteria (2-4 concrete evaluation criteria)
+- weight (positive integer)
 
-The total weight of all questions must equal 100.
+Constraints:
+- Question IDs must be unique integers from 1 to 6.
+- Weights must be positive integers.
+- The six weights must sum exactly to 100.
+- Each question must have 2-4 concrete evaluation criteria.
 
 Return ONLY valid JSON.
 

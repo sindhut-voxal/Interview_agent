@@ -285,7 +285,7 @@
           <div class="flex items-center gap-3 p-2 rounded-xl bg-white/5 border border-white/10"><div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white text-xs">✦</div><div class="flex-1"><div class="text-sm font-medium text-white">AI Interviewer</div><div class="text-xs text-emerald-400">● Speaking</div></div><span class="text-xs text-white/40">🎙️</span></div>
           <div class="flex items-center gap-3 p-2 rounded-xl bg-white/5 border border-white/10"><div class="w-8 h-8 rounded-full bg-zinc-600 flex items-center justify-center text-white text-sm">👤</div><div class="flex-1"><div class="text-sm font-medium text-white">You</div><div class="text-xs text-white/50">Candidate</div></div><span id="partMic" class="text-xs">🎙️</span></div>
         </div>
-        <div class="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200">Keep answers concise (45–90s). The AI gives a quick feedback after each answer, then moves on.</div>
+        <div class="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-200">Keep answers concise (45–90s). Your detailed evaluation will be generated after the interview completes.</div>
       </div>
 
       <div class="meet-tile rounded-2xl p-4">
@@ -405,9 +405,9 @@ function showInterview(){
   hideAll(); $('interviewScreen').classList.remove('hidden'); $('globalHeader').classList.remove('hidden');
   setStep(2); buildProgressDots(); window.scrollTo(0,0);
 }
-function showResults(score, evaluations){
+function showResults(score, evaluations, opts={}){
   hideAll(); $('resultsScreen').classList.remove('hidden'); $('globalHeader').classList.remove('hidden');
-  setStep(3); renderResults(score, evaluations); window.scrollTo(0,0);
+  setStep(3); renderResults(score, evaluations, opts); window.scrollTo(0,0);
 }
 function restartFlow(){
   if(pc) try{pc.close()}catch{}
@@ -439,17 +439,36 @@ function buildProgressDots(){
   $('progressBar').style.width=pct+'%';
   $('progressText').textContent=`Question ${Math.min(currentIdx+1,totalQs)} of ${totalQs}`;
 }
-function renderResults(score, evaluations){
+function renderResults(score, evaluations, opts={}){
   const sEl=$('finalScore');
-  if(score!=null && !isNaN(score)){
-    sEl.innerHTML=Math.round(score)+'<span class="text-lg text-zinc-400">/100</span>';
-    const label=$('scoreLabel');
-    if(score>=80) label.textContent='Strong — interview ready';
-    else if(score>=60) label.textContent='Good — polish a bit';
-    else label.textContent='Keep practicing';
-    label.className='text-xs mt-2 px-2.5 py-1 rounded-full inline-block '+(score>=80?'bg-emerald-100 text-emerald-800':score>=60?'bg-amber-100 text-amber-800':'bg-red-100 text-red-800');
-  } else {
+  if(opts.incomplete){
     sEl.innerHTML='—<span class="text-lg text-zinc-400">/100</span>';
+    const label=$('scoreLabel');
+    label.textContent='Interview ended before completion';
+    label.className='text-xs mt-2 px-2.5 py-1 rounded-full inline-block bg-amber-100 text-amber-800';
+    // inject incomplete banner if not already
+    let banner=document.getElementById('incompleteBanner');
+    if(!banner){
+      banner=document.createElement('div');
+      banner.id='incompleteBanner';
+      banner.className='mt-3 p-3 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800 text-center';
+      sEl.parentElement.appendChild(banner);
+    }
+    banner.textContent=opts.msg || 'Interview ended before completion — complete all 6 questions for a final score.';
+    banner.classList.remove('hidden');
+  } else {
+    const banner=document.getElementById('incompleteBanner');
+    if(banner) banner.classList.add('hidden');
+    if(score!=null && !isNaN(score)){
+      sEl.innerHTML=Math.round(score)+'<span class="text-lg text-zinc-400">/100</span>';
+      const label=$('scoreLabel');
+      if(score>=80) label.textContent='Strong — interview ready';
+      else if(score>=60) label.textContent='Good — polish a bit';
+      else label.textContent='Keep practicing';
+      label.className='text-xs mt-2 px-2.5 py-1 rounded-full inline-block '+(score>=80?'bg-emerald-100 text-emerald-800':score>=60?'bg-amber-100 text-amber-800':'bg-red-100 text-red-800');
+    } else {
+      sEl.innerHTML='—<span class="text-lg text-zinc-400">/100</span>';
+    }
   }
   const list=$('evaluationsList'); list.innerHTML='';
   if(evaluations && evaluations.length){
@@ -709,8 +728,12 @@ async function startVoiceWithCache(){
 
     const offer = await pc.createOffer({ offerToReceiveAudio:true, offerToReceiveVideo:false });
     await pc.setLocalDescription(offer);
-
-    const body = { resume: resumeCache, job_description: jdCache };
+    const body = {
+      session_id: sessionId,
+      resume: resumeCache,
+      job_description: jdCache
+    };
+    
     const res = await fetch(offerUrl,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -726,33 +749,66 @@ async function startVoiceWithCache(){
     }
     pendingCandidates=[];
 
-    $('liveTranscript').textContent='Voice connected. You’ll hear a short intro + your first screening question. After each answer: quick feedback, then “let’s move to the next question.”';
+    $('liveTranscript').textContent='Voice connected. You’ll hear a short intro + your first screening question. Please answer each question naturally — I’ll move to the next question when you’re done.';
     setStatus('Live — interview in progress','green');
     if($('aiSub')) $('aiSub').textContent='Interview in progress — speak after each question';
     // simulate progress advancing on track events (real feedback moves via InterviewProcessor voice)
     pc.addEventListener('track', ()=> setTimeout(()=> { const a=$('aiAvatar'); if(a) a.classList.remove('ring-4'); const b=$('aiSpeakingBadge'); if(b) b.classList.add('hidden'); }, 800));
 
-    // Poll for interview end: when pipeline ends, connection closes → show results after a delay
-    // Also try to fetch evaluations from REST if available
+    // Single authoritative report path — avoids duplicate Gemini evals
     let ended=false;
+    let reportInFlight=false;
+    async function fetchReportOnce(){
+      if(!sessionId) return { score:null, evals:null, incomplete:false, raw:null };
+      const bases = [location.origin, 'http://localhost:8000', 'http://127.0.0.1:8000'];
+      for(const base of bases){
+        try{
+          const r = await fetch(`${base}/api/interview/${sessionId}/report`, { method:'POST' });
+          if(r.ok){ const j=await r.json(); return { score:j.final_score, evals:j.evaluations, incomplete:false, raw:j }; }
+          if(r.status===400){
+            const t=await r.text();
+            console.warn('report not ready (incomplete):', t);
+            // Interview abandoned — fetch stored state but do NOT treat as completed report
+            for(const b2 of bases){
+              try{ const g=await fetch(`${b2}/api/interview/${sessionId}`); if(g.ok){ const j=await g.json(); return { score:null, evals:j.evaluations, incomplete:true, raw:j, msg:t }; } }catch{}
+            }
+            return { score:null, evals:null, incomplete:true, raw:null, msg:t };
+          }
+        }catch(e){ console.warn('report POST failed at', base, e); }
+      }
+      for(const base of bases){
+        try{
+          const r=await fetch(`${base}/api/interview/${sessionId}`);
+          if(r.ok){ const j=await r.json(); const incomplete = !j.is_complete; return { score: incomplete? null : j.final_score, evals:j.evaluations, incomplete, raw:j }; }
+        }catch{}
+      }
+      return { score:null, evals:null, incomplete:false, raw:null };
+    }
+    async function generateAndShowReport(){
+      if(reportInFlight) return;
+      reportInFlight=true;
+      $('liveTranscript').textContent='Interview ended — generating your detailed report…';
+      setStatus('Generating report…','amber');
+      const { score, evals, incomplete, raw } = await fetchReportOnce();
+      if(incomplete){
+        // Abandoned: do not show final score as if completed
+        const answered = raw?.answers?.length ?? raw?.raw?.answers?.length ?? '?';
+        const total = raw?.questions?.length ?? totalQs;
+        toast(`Interview ended before completion (${answered}/${total}) — no final score`);
+        showResults(null, evals, { incomplete:true, msg:`Interview ended before completion (${answered}/${total} answered). Complete all 6 questions for a final score.` });
+      } else {
+        showResults(score, evals);
+      }
+      reportInFlight=false;
+    }
     const checkEnd=()=>{
       if(ended) return;
       if(pc.connectionState==='closed' || pc.connectionState==='failed'){
         ended=true;
-        setTimeout(async ()=>{
-          let score=null, evals=null;
-          if(sessionId){
-            try{
-              const r=await fetch(`/api/interview/${sessionId}`);
-              if(r.ok){ const j=await r.json(); score=j.final_score; evals=j.evaluations; }
-            }catch{}
-          }
-          showResults(score, evals);
-        }, 800);
+        setTimeout(()=> generateAndShowReport(), 800);
       }
     };
     pc.addEventListener('connectionstatechange', checkEnd);
-    // fallback: after 10 min show results
     setTimeout(checkEnd, 610*1000);
 
   }catch(e){
@@ -766,18 +822,12 @@ async function startVoiceWithCache(){
   }
 }
 
-function endInterview(){
+async function endInterview(){
   if(pc) try{pc.close()}catch{};
-  setStatus('Ended','zinc'); if($('aiSub')) $('aiSub').textContent='Interview ended'; clearInterval(timerIv);
-  // try to fetch final results
-  (async()=>{
-    let score=null, evals=null;
-    if(sessionId){
-      try{ const r=await fetch(`/api/interview/${sessionId}`); if(r.ok){ const j=await r.json(); score=j.final_score; evals=j.evaluations; } }catch{}
-    }
-    showResults(score, evals);
-    toast('Interview ended');
-  })();
+  setStatus('Ended','zinc'); if($('aiSub')) $('aiSub').textContent='Interview ended — generating report…'; clearInterval(timerIv);
+  ended=true;
+  await generateAndShowReport();
+  toast('Interview ended');
 }
 $('endBtn').addEventListener('click', endInterview);
 $('reconnectBtn').addEventListener('click', startVoiceWithCache);

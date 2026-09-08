@@ -3,6 +3,8 @@ import uuid
 import json
 import pathlib
 import asyncio
+import tempfile
+from copy import deepcopy
 from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
@@ -16,12 +18,20 @@ load_dotenv()
 
 from interview.controller import InterviewController
 from interview.state import InterviewState
+from session_store import save_session, load_session
 
 app = FastAPI(title="Voxal — 10-min Screening Interview")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:7860",
+        "http://127.0.0.1:7860",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,6 +44,7 @@ controller = InterviewController()
 # Dedupe: if same resume+JD received within 60s (e.g. client double-fire), reuse same generation
 _generation_cache: dict[str, tuple[float, InterviewState]] = {}
 _generation_locks: dict[str, asyncio.Lock] = {}
+_report_locks: dict[str, asyncio.Lock] = {}
 
 CLIENT_DIR = pathlib.Path(__file__).parent.parent / "client"
 SERVER_DIR = pathlib.Path(__file__).parent
@@ -50,31 +61,50 @@ async def extract_text_from_upload(file: UploadFile) -> str:
             import io
             reader = PdfReader(io.BytesIO(data))
             text = "\n".join([p.extract_text() or "" for p in reader.pages])
-            return text.strip() or data.decode("utf-8", errors="ignore")
+            stripped = text.strip()
+            if stripped:
+                return stripped
+            raise ValueError("Could not extract text from PDF.")
         except Exception as e:
-            logger.warning(f"pypdf failed for {name}: {e}, falling back to utf-8")
-            return data.decode("utf-8", errors="ignore")
+            logger.warning(f"pypdf failed for {name}: {e}")
+            raise HTTPException(400, f"Could not extract text from PDF '{name}': {e}")
 
-    if suffix in (".docx", ".doc"):
+    if suffix == ".docx":
         try:
             import docx
             import io
             doc = docx.Document(io.BytesIO(data))
-            return "\n".join([p.text for p in doc.paragraphs])
+            text = "\n".join([p.text for p in doc.paragraphs])
+            stripped = text.strip()
+            if stripped:
+                return stripped
+            raise ValueError("Could not extract text from DOCX.")
+        except HTTPException:
+            raise
         except Exception as e:
             logger.warning(f"docx parse failed for {name}: {e}")
-            return data.decode("utf-8", errors="ignore")
+            raise HTTPException(400, f"Could not extract text from DOCX '{name}': {e}")
 
-    # txt, md, etc — try utf-8
+    if suffix == ".doc":
+        raise HTTPException(400, f"Legacy .doc format is not supported for '{name}' — please upload .docx or PDF.")
+
     try:
         return data.decode("utf-8")
     except Exception:
         return data.decode("utf-8", errors="ignore")
 
 
+def _get_session(session_id: str) -> InterviewState | None:
+    """Try disk first (bot writes), fallback to in-memory."""
+    state = load_session(session_id)
+    if state is not None:
+        sessions[session_id] = state
+        return state
+    return sessions.get(session_id)
+
+
 def _write_latest_interview(resume: str, jd: str):
-    """Write latest resume/JD so the Pipecat bot (voice mode) can pick it up."""
-    import tempfile
+    """Write latest resume/JD so the Pipecat bot (voice mode) can pick it up. Debug only — session_id is authoritative."""
     payload = {"resume": resume, "job_description": jd}
     tmp_path = pathlib.Path(tempfile.gettempdir()) / "latest_interview.json"
     for p in [SERVER_DIR / "latest_interview.json", tmp_path]:
@@ -106,6 +136,8 @@ async def extract(file: UploadFile = File(...)):
     try:
         text = await extract_text_from_upload(file)
         return {"text": text, "filename": file.filename}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Extract failed: {e}")
 
@@ -130,80 +162,71 @@ async def create_interview(
     jd = ""
 
     if resume_file and resume_file.filename:
-        # file was uploaded — extract
         resume = await extract_text_from_upload(resume_file)
     elif resume_text and resume_text.strip():
         resume = resume_text.strip()
 
     if jd_file and jd_file.filename:
-        # need to re-read because earlier if consumed? already handled
         jd = await extract_text_from_upload(jd_file)
     elif jd_text and jd_text.strip():
         jd = jd_text.strip()
 
-    # Edge: both provided — file takes precedence already
     if not resume:
         raise HTTPException(400, "Resume is required — upload a file or paste text.")
     if not jd:
         raise HTTPException(400, "Job description is required — upload a file or paste text.")
 
-    # Trim to avoid huge prompts
     resume = resume[:15000]
     jd = jd[:15000]
 
     logger.info(f"Creating interview — resume {len(resume)} chars, JD {len(jd)} chars")
 
-    # Dedup key = hash of trimmed resume+jd
     import hashlib, time
     cache_key = hashlib.sha256(f"{resume}\n---\n{jd}".encode()).hexdigest()
     now = time.time()
-    # Reuse if same request within 60s (double-click / client retry)
     cached = _generation_cache.get(cache_key)
     if cached and (now - cached[0] < 60):
         logger.info("Dedup: reusing cached interview for same resume/JD within 60s")
-        state = cached[1]
+        state = deepcopy(cached[1])
     else:
-        # Lock per key so concurrent duplicate requests coalesce to single LLM call
         lock = _generation_locks.setdefault(cache_key, asyncio.Lock())
         async with lock:
-            # double-check after acquiring lock
             cached2 = _generation_cache.get(cache_key)
             if cached2 and (time.time() - cached2[0] < 60):
                 logger.info("Dedup (locked): reusing cached interview")
-                state = cached2[1]
+                state = deepcopy(cached2[1])
             else:
                 state = await controller.create_interview(resume=resume, job_description=jd)
                 if not state or not state.questions:
                     raise HTTPException(500, "LLM failed to generate interview questions")
                 _generation_cache[cache_key] = (time.time(), state)
-                # prune old entries (>5 min)
+                state = deepcopy(state)
                 for k, (ts, _) in list(_generation_cache.items()):
                     if time.time() - ts > 300:
                         _generation_cache.pop(k, None)
+                        _generation_locks.pop(k, None)
 
     session_id = str(uuid.uuid4())
     sessions[session_id] = state
+    save_session(session_id, state)
 
     _write_latest_interview(resume, jd)
 
-    first = state.get_current_question()
-
+    # Do NOT leak questions to candidate before interview. Voice runner loads them via session_id.
     return {
         "session_id": session_id,
         "total": len(state.questions),
-        "questions": state.questions,
-        "current_question": first,
-        "current_index": 0,
     }
 
 
 @app.post("/api/interview/{session_id}/answer")
 async def submit_answer(session_id: str, payload: dict):
     """
+    REAL-TIME: store answer and return next question. No LLM eval.
     Body: { "answer": "..." }
-    Returns: { feedback, next_question, done, final_score?, progress }
+    Returns: { next_question, done, progress }
     """
-    state = sessions.get(session_id)
+    state = _get_session(session_id)
     if not state:
         raise HTTPException(404, "Session not found. Create a new interview first.")
 
@@ -215,43 +238,73 @@ async def submit_answer(session_id: str, payload: dict):
     if current is None:
         return {
             "done": True,
-            "final_score": state.final_score,
-            "message": "Interview already complete.",
+            "message": "Interview already complete. Call /report to generate evaluation.",
         }
 
     next_q = await controller.submit_answer(state=state, answer=answer)
-
-    last_eval = state.evaluations[-1] if state.evaluations else None
-    feedback = (last_eval or {}).get("feedback", "")
-    score = (last_eval or {}).get("score", 0)
+    save_session(session_id, state)
 
     if next_q is None:
-        # done
         return {
             "done": True,
-            "feedback": feedback,
-            "score": score,
-            "final_score": state.final_score,
-            "evaluations": state.evaluations,
             "progress": {"current": len(state.questions), "total": len(state.questions)},
-            "message": "Thank you. That was the last question. The interview is now complete.",
+            "message": "Thank you. That was the last question. Generating your detailed report...",
+            "answers": state.answers,
         }
 
     idx = state.current_question_index
     return {
         "done": False,
-        "feedback": feedback,
-        "score": score,
         "next_question": next_q,
         "progress": {"current": idx + 1, "total": len(state.questions)},
-        # front-end will show: feedback + "Let's move to the next question." + next_question
-        "transition": f"{feedback} Let's move to the next question." if feedback else "Thanks. Let's move to the next question.",
+        "transition": "Thanks for your answer. Let's move to the next question.",
     }
+
+
+@app.post("/api/interview/{session_id}/report")
+async def generate_report(session_id: str):
+    """
+    POST-INTERVIEW: batch Gemini evaluation for all stored answers.
+    Call after is_complete. Returns detailed report.
+    """
+    lock = _report_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        state = _get_session(session_id)
+        if not state:
+            raise HTTPException(404, "Session not found")
+
+        if not state.is_interview_complete():
+            raise HTTPException(400, f"Interview not complete: {len(state.answers)}/{len(state.questions)} answered. Finish all questions first.")
+
+        if state.evaluations and state.final_score is not None:
+            return {
+                "final_score": state.final_score,
+                "evaluations": state.evaluations,
+                "answers": state.answers,
+                "questions": state.questions,
+            }
+
+        logger.info(f"Generating batch report for {session_id} ({len(state.answers)} answers)")
+        try:
+            report = await controller.evaluate_interview(state)
+            save_session(session_id, state)
+        except Exception as e:
+            logger.exception(f"Report generation failed: {e}")
+            raise HTTPException(500, f"Report generation failed: {e}")
+
+        return {
+            "final_score": report["final_score"],
+            "evaluations": report["evaluations"],
+            "strengths": report.get("strengths", []),
+            "improvements": report.get("improvements", []),
+            "answers": state.answers,
+            "questions": state.questions,
+        }
 
 
 @app.get("/api/interview/{session_id}")
 async def get_interview(session_id: str):
-    state = sessions.get(session_id)
+    state = _get_session(session_id)
     if not state:
         raise HTTPException(404, "Session not found")
     return {
@@ -272,7 +325,6 @@ if CLIENT_DIR.exists():
     async def serve_index():
         return FileResponse(str(CLIENT_DIR / "index.html"))
 
-    # Serve client files (css/js etc) — catch-all that does NOT shadow /api or /docs
     @app.get("/{path:path}", include_in_schema=False)
     async def serve_spa(path: str):
         if path.startswith("api/") or path.startswith("docs") or path.startswith("openapi") or path.startswith("redoc"):
@@ -280,7 +332,6 @@ if CLIENT_DIR.exists():
         candidate = CLIENT_DIR / path
         if candidate.is_file():
             return FileResponse(str(candidate))
-        # SPA fallback
         index = CLIENT_DIR / "index.html"
         if index.exists():
             return FileResponse(str(index))
@@ -289,5 +340,4 @@ if CLIENT_DIR.exists():
 
 if __name__ == "__main__":
     import uvicorn
-    # When run as `python app.py` from server/ dir, app is importable as __main__:app
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)

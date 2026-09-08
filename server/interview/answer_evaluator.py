@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import re
 
 from dotenv import load_dotenv
 from loguru import logger
@@ -42,7 +43,6 @@ class ResponseCollector(FrameProcessor):
 
         self.response_complete = asyncio.Event()
 
-
     async def process_frame(
         self,
         frame,
@@ -62,9 +62,7 @@ class ResponseCollector(FrameProcessor):
             LLMFullResponseEndFrame,
         ):
 
-            logger.info(
-                "LLM answer evaluation completed"
-            )
+            logger.info("LLM answer evaluation completed")
 
             self.response_complete.set()
 
@@ -76,20 +74,25 @@ class ResponseCollector(FrameProcessor):
 
 def parse_json_response(response: str):
 
-    response = response.strip()
-
-    if response.startswith("```json"):
-        response = response[len("```json"):]
-
-    elif response.startswith("```"):
-        response = response[len("```"):]
-
-    if response.endswith("```"):
-        response = response[:-3]
-
-    response = response.strip()
-
-    return json.loads(response)
+    raw = response.strip()
+    fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw, re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        raw = fence_match.group(1).strip()
+    else:
+        first_brace = raw.find("{")
+        last_brace = raw.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            candidate = raw[first_brace : last_brace + 1]
+            try:
+                return json.loads(candidate)
+            except Exception:
+                pass
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?", "", raw, flags=re.IGNORECASE).strip()
+    if raw.endswith("```"):
+        raw = raw[:-3].strip()
+    return json.loads(raw)
 
 
 async def _evaluate_once(prompt: str, model: str, timeout: int = 20) -> str:
@@ -133,11 +136,25 @@ async def evaluate_answer(
 
     evaluation = parse_json_response(raw)
 
-    if not isinstance(evaluation, dict) or "score" not in evaluation or "feedback" not in evaluation:
+    if not isinstance(evaluation, dict):
         raise ValueError(f"Malformed evaluation JSON: {evaluation}")
-
+    for field in ("question_id", "score", "feedback", "strengths", "improvements"):
+        if field not in evaluation:
+            raise ValueError(f"Missing field '{field}' in evaluation: {evaluation}")
+    # score validation + clamping
     try:
-        evaluation["score"] = max(0, min(int(evaluation["score"]), int(question.get("weight", 100))))
+        score = int(evaluation["score"])
     except Exception:
-        pass
+        raise ValueError(f"Invalid score: {evaluation.get('score')}")
+    weight = int(question.get("weight", 100))
+    score = max(0, min(score, weight))
+    evaluation["score"] = score
+    # ensure strengths/improvements are lists
+    if not isinstance(evaluation.get("strengths"), list):
+        evaluation["strengths"] = []
+    if not isinstance(evaluation.get("improvements"), list):
+        evaluation["improvements"] = []
+    if not isinstance(evaluation.get("feedback"), str):
+        evaluation["feedback"] = str(evaluation.get("feedback", ""))
+    evaluation["question_id"] = int(question["id"])
     return evaluation

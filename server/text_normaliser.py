@@ -25,8 +25,9 @@ ACRONYM_MAP = {
     "NLP": "N L P",
     "ASR": "A S R",
     "WebRTC": "Web R T C",
-    "AI": "A I",
-    "ML": "M L",
+    # AI/ML are pronounced naturally by Deepgram Aura voices; expanding to
+    # "A I"/"M L" would transform normal question wording unnecessarily and
+    # cause awkward spelling in interview questions. Keep them as-is for TTS.
     "UI": "U I",
     "UX": "U X",
 }

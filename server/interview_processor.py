@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 from loguru import logger
 
@@ -8,6 +9,11 @@ from pipecat.frames.frames import (
     InterimTranscriptionFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSStartedFrame,
+    TTSStoppedFrame,
+    BotStartedSpeakingFrame,
+    BotStoppedSpeakingFrame,
+    TTSSpeakFrame,
 )
 
 from pipecat.processors.frame_processor import (
@@ -17,6 +23,15 @@ from pipecat.processors.frame_processor import (
 
 from interview.controller import InterviewController
 from interview.state import InterviewState
+from session_store import save_session
+
+# Inline lightweight normalization so we don't depend on LLMTextFrame path.
+# Reuse text_normaliser.normalize_for_tts if available.
+try:
+    from text_normaliser import normalize_for_tts  # type: ignore
+except Exception:
+    def normalize_for_tts(text: str) -> str:  # fallback no-op
+        return text.strip()
 
 
 class InterviewProcessor(FrameProcessor):
@@ -25,128 +40,177 @@ class InterviewProcessor(FrameProcessor):
         self,
         controller: InterviewController,
         state: InterviewState,
-        debounce_s: float = 3.0,
-        min_chars: int = 18,
+        session_id: str | None = None,
+        debounce_s: float = 1.8,
+        min_chars: int = 3,
     ):
         super().__init__()
 
         self.controller = controller
         self.state = state
+        self.session_id = session_id
 
         self.interview_finished = False
-        # Buffer + debounce to avoid treating every 1-2 word Deepgram final as a full answer
+        # Buffer accumulates ONLY final transcripts. Interim is used solely to reset debounce.
         self._buffer: str = ""
         self._debounce_s = debounce_s
         self._min_chars = min_chars
         self._debounce_task: asyncio.Task | None = None
         self._processing: bool = False
+        # Speaking/Listening state: question delivery must be atomic
+        self._is_speaking: bool = True  # start speaking (intro Q1) until first TTSStoppedFrame + guard
+        self._guard_task: asyncio.Task | None = None
+        self._report_triggered: bool = False
 
-    async def _flush_buffer(self):
-        """Wait debounce then evaluate accumulated buffer as one answer."""
+    # ---------- debounce helpers ----------
+
+    def _reset_debounce(self):
+        """Reset the silence timer because candidate is still speaking (interim detected)."""
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+        self._debounce_task = asyncio.create_task(self._debounced_flush())
+
+    async def _debounced_flush(self):
         try:
             await asyncio.sleep(self._debounce_s)
-            if self.interview_finished:
-                return
-            if self._processing:
-                return
-            answer = self._buffer.strip()
-            self._buffer = ""
-            if not answer or len(answer) < self._min_chars:
-                logger.info(f"STT buffer below threshold ({len(answer)} chars) — ignoring: '{answer}'")
-                return
-            # Ignore filler-only answers like "Oh yeah" / "Hello?" that slip through as 8-char finals
-            _filler = answer.lower().strip(" .!?,")
-            if _filler in {"oh yeah", "oh yeah.", "yeah", "yes", "hello", "hello?", "hi", "hey", "okay", "ok", "thanks", "thank you"}:
-                logger.info(f"STT filler ignored: '{answer}'")
-                return
-            logger.info(f"STT final transcript (debounced) → evaluating answer for Q{self.state.current_question_index+1}: '{answer}'")
-            self._processing = True
-            next_question = (
-                await self.controller.submit_answer(
-                    state=self.state,
-                    answer=answer,
-                )
-            )
-            self._processing = False
-            # need to push feedback/transition via queue to avoid blocking pipeline
-            await self._push_result(next_question)
+            await self._flush_buffer()
         except asyncio.CancelledError:
+            pass
+
+    async def _flush_buffer(self):
+        """Store answer and advance. No LLM in live path."""
+        if self.interview_finished:
             return
+        answer = self._buffer.strip()
+        self._buffer = ""
+        if not answer:
+            logger.info("STT buffer empty — ignoring")
+            return
+        if len(answer) < self._min_chars:
+            logger.info(f"STT buffer below threshold ({len(answer)} chars) — still storing: '{answer}'")
+        # Filler filter: single-word filler utterances should not advance interview
+        _filler = answer.lower().strip(" .!?,")
+        if _filler in {"oh yeah", "oh yeah.", "yeah", "yes", "hello", "hello?", "hi", "hey", "okay", "ok", "thanks", "thank you"}:
+            logger.info(f"STT filler ignored: '{answer}'")
+            return
+        q_idx = self.state.current_question_index + 1
+        logger.info(f"STT final (debounced) → storing answer for Q{q_idx}: '{answer[:120]}...' ({len(answer)} chars)")
+        try:
+            next_question = await self.controller.submit_answer(state=self.state, answer=answer)
+            if self.session_id:
+                try:
+                    save_session(self.session_id, self.state)
+                except Exception as e:
+                    logger.warning(f"Failed to persist session {self.session_id}: {e}")
+            await self._push_result(next_question)
         except Exception as e:
-            self._processing = False
             logger.exception(f"Error in _flush_buffer: {e}")
-            # Try to recover so interview doesn't stall — generate fallback evaluation and continue
             try:
-                # mimic fallback if controller failed before moving pointer
                 curr = self.state.get_current_question()
-                if curr is not None and len(self.state.answers) == len(self.state.evaluations):
-                    # answer was added but evaluation missing — add fallback manually
-                    from interview.scoring import calculate_final_score
-                    weight = int(curr.get("weight", 10))
-                    # simple heuristic already in answer_evaluator fallback
-                    ans_len = len(answer) if 'answer' in locals() else len(self._buffer)
-                    score = max(1, weight // 3) if ans_len < 20 else int(weight * 0.6)
-                    self.state.add_evaluation({"question_id": curr["id"], "feedback": "Thanks for your answer.", "score": score, "strengths": [], "improvements": []})
+                if curr is not None and len(self.state.answers) > self.state.current_question_index:
                     self.state.move_to_next_question()
-                    if self.state.is_interview_complete():
-                        calculate_final_score(self.state)
-                        next_q = None
-                    else:
-                        next_q = self.state.get_current_question()
-                    await self._push_result(next_q)
-                elif curr is None:
-                    pass
-                else:
-                    # last attempt: push generic move
-                    nxt = self.state.get_current_question()
-                    await self._push_result(nxt)
+                nxt = self.state.get_current_question() if not self.state.is_interview_complete() else None
+                await self._push_result(nxt)
             except Exception as rec_e:
                 logger.error(f"Recovery also failed: {rec_e}")
 
-    async def _push_result(self, next_question):
-        last_evaluation = (
-            self.state.evaluations[-1]
-            if self.state.evaluations
-            else None
-        )
-        feedback_text = ""
-        if last_evaluation and last_evaluation.get("feedback"):
-            feedback_text = last_evaluation["feedback"].strip()
-            if feedback_text and not feedback_text.endswith("."):
-                feedback_text += "."
+    def _clear_stale_stt(self):
+        """Clear buffer/debounce leaked from previous turn."""
+        if self._buffer:
+            logger.info(f"Clearing stale STT buffer: '{self._buffer[:80]}'")
+            self._buffer = ""
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+            self._debounce_task = None
 
+    async def _push_result(self, next_question):
+        """Push next question or closing message as ONE atomic TTS utterance.
+
+        Uses TTSSpeakFrame which creates a dedicated audio context per utterance
+        in Pipecat 1.4.0. This guarantees the TTS service synthesizes the entire
+        text as a single logical utterance instead of splitting a TextFrame into
+        multiple sentence-level aggregations (which Deepgram would speak as
+        independent chunks, causing awkward pauses and merged transition+question
+        audio).
+        """
+        self._clear_stale_stt()
         if next_question is None:
             self.interview_finished = True
-            if feedback_text:
-                final_message = (
-                    f"{feedback_text} "
-                    "Thank you. That was the last question. "
-                    "The interview is now complete. "
-                    f"Your final score is "
-                    f"{self.state.final_score} out of 100."
-                )
-            else:
-                final_message = (
-                    "Thank you. The interview is now complete. "
-                    f"Your final score is "
-                    f"{self.state.final_score} out of 100."
-                )
-            await self.push_frame(TextFrame(final_message), FrameDirection.DOWNSTREAM)
+            final_message = "Thank you. That concludes the interview."
+            final_message = normalize_for_tts(final_message)
+            self._is_speaking = True
+            if self._guard_task and not self._guard_task.done():
+                self._guard_task.cancel()
+                self._guard_task = None
+            logger.info("SPEAKING -> pushing final message (atomic TTSSpeakFrame)")
+            await self.push_frame(TTSSpeakFrame(text=final_message), FrameDirection.DOWNSTREAM)
+            # Persist completion so /report can batch-evaluate; trigger report once.
+            if self.session_id:
+                try:
+                    save_session(self.session_id, self.state)
+                except Exception as e:
+                    logger.warning(f"Failed to persist session {self.session_id} on completion: {e}")
+            # Trigger post-interview report generation in background (once, non-blocking).
+            if not getattr(self, "_report_triggered", False):
+                self._report_triggered = True
+                try:
+                    asyncio.create_task(self._trigger_report())
+                except Exception as e:
+                    logger.warning(f"Failed to schedule report generation: {e}")
             return
+        # Q2-Q6: speak ONLY the next question text — no filler.
+        question_text = next_question["question"]
+        question_text = normalize_for_tts(question_text)
+        self._is_speaking = True
+        if self._guard_task and not self._guard_task.done():
+            self._guard_task.cancel()
+            self._guard_task = None
+        logger.info(f"SPEAKING -> pushing Q{self.state.current_question_index+1} atomic TTSSpeakFrame ({len(question_text)} chars)")
+        await self.push_frame(TTSSpeakFrame(text=question_text), FrameDirection.DOWNSTREAM)
 
-        if feedback_text:
-            combined = (
-                f"{feedback_text} "
-                "Let's move to the next question. "
-                f"{next_question['question']}"
-            )
-        else:
-            combined = (
-                "Thanks for your answer. "
-                "Let's move to the next question. "
-                f"{next_question['question']}"
-            )
-        await self.push_frame(TextFrame(combined), FrameDirection.DOWNSTREAM)
+    async def _trigger_report(self):
+        """Background batch evaluation after interview completes. Idempotent."""
+        try:
+            # Avoid duplicate generation if evaluations already exist.
+            if self.state.evaluations and self.state.final_score is not None:
+                logger.info("Report already generated — skipping background evaluation")
+                return
+            logger.info(f"Starting post-interview batch evaluation for session {self.session_id or 'unknown'}")
+            await self.controller.evaluate_interview(self.state)
+            if self.session_id:
+                try:
+                    save_session(self.session_id, self.state)
+                except Exception as e:
+                    logger.warning(f"Failed to persist session after report: {e}")
+            logger.info(f"Batch report generated — final_score={self.state.final_score}")
+        except Exception as e:
+            logger.exception(f"Background report generation failed: {e}")
+
+    async def _on_tts_started(self):
+        if self._guard_task and not self._guard_task.done():
+            self._guard_task.cancel()
+            self._guard_task = None
+        if not self._is_speaking:
+            logger.info("SPEAKING started (TTSStartedFrame)")
+        self._is_speaking = True
+
+    async def _on_tts_stopped(self):
+        # Guard 200ms before transitioning to LISTENING — handles multi-sentence splits + filters bot echo
+        if self._guard_task and not self._guard_task.done():
+            self._guard_task.cancel()
+
+        async def guard():
+            try:
+                await asyncio.sleep(0.2)
+                if self.interview_finished:
+                    return
+                self._clear_stale_stt()
+                self._is_speaking = False
+                logger.info("TTSStoppedFrame + 200ms guard -> LISTENING (buffer cleared, fresh turn)")
+            except asyncio.CancelledError:
+                return
+
+        self._guard_task = asyncio.create_task(guard())
 
     async def _cancel_debounce(self):
         if self._debounce_task and not self._debounce_task.done():
@@ -162,57 +226,66 @@ class InterviewProcessor(FrameProcessor):
         frame,
         direction: FrameDirection,
     ):
-        await super().process_frame(
-            frame,
-            direction,
-        )
+        await super().process_frame(frame, direction)
 
-        # Graceful shutdown: cancel pending debounce to avoid 15s task_manager timeout
         if isinstance(frame, (CancelFrame, EndFrame)):
             self.interview_finished = True
             await self._cancel_debounce()
+            if self._guard_task and not self._guard_task.done():
+                self._guard_task.cancel()
             await self.push_frame(frame, direction)
             return
 
-        # Log interim for debugging and RESET debounce (user still speaking)
+        if isinstance(frame, (TTSStartedFrame, BotStartedSpeakingFrame)):
+            await self._on_tts_started()
+            await self.push_frame(frame, direction)
+            return
+        if isinstance(frame, (TTSStoppedFrame, BotStoppedSpeakingFrame)):
+            await self._on_tts_stopped()
+            await self.push_frame(frame, direction)
+            return
+
+        # Interim: used ONLY to detect continued speech and reset debounce.
+        # Never append interim text to buffer (interim is an evolving hypothesis).
         if isinstance(frame, InterimTranscriptionFrame):
             txt = frame.text.strip()
-            if txt:
-                logger.debug(f"STT interim: '{txt}'")
-                # keep debounce alive while user is still speaking
-                if self._buffer and self._debounce_task and not self._debounce_task.done():
-                    self._debounce_task.cancel()
-                    self._debounce_task = asyncio.create_task(self._flush_buffer())
-            await self.push_frame(frame, direction)
+            if not txt:
+                return
+            if self._is_speaking:
+                logger.info(f"STT interim during SPEAKING — dropped: '{txt[:60]}'")
+                return
+            # LISTENING: if we already have final text buffered, interim means candidate still speaking
+            if self._buffer:
+                logger.info(f"STT interim (LISTENING, buffer={len(self._buffer)}) — resetting debounce: '{txt[:60]}'")
+                self._reset_debounce()
+            else:
+                logger.info(f"STT interim (LISTENING, no buffer yet): '{txt[:60]}'")
+            # Do NOT forward downstream (no LLM aggregator in deterministic pipeline)
             return
 
-        # Only process candidate speech from STT
         if isinstance(frame, TranscriptionFrame):
-
-            # Ignore anything after interview completion
             if self.interview_finished:
-
+                return
+            if self._is_speaking:
+                logger.info(f"STT final during SPEAKING — dropped: '{frame.text.strip()[:60]}'")
                 return
 
             answer = frame.text.strip()
-            logger.info(f"STT transcript received: '{answer}' (buffer len before={len(self._buffer)})")
+            logger.info(f"STT transcript received: '{answer[:80]}' (buffer len before={len(self._buffer)})")
 
             if not answer:
                 return
 
-            # Accumulate into buffer instead of evaluating immediately
+            # Accumulate ONLY final transcripts
             if self._buffer:
                 self._buffer += " " + answer
             else:
                 self._buffer = answer
 
-            # Reset debounce timer
+            # Reset debounce timer (candidate may still be speaking; interim will extend it)
             if self._debounce_task and not self._debounce_task.done():
                 self._debounce_task.cancel()
-            self._debounce_task = asyncio.create_task(self._flush_buffer())
+            self._debounce_task = asyncio.create_task(self._debounced_flush())
             return
 
-        await self.push_frame(
-            frame,
-            direction,
-        )
+        await self.push_frame(frame, direction)
