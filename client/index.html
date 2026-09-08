@@ -263,17 +263,13 @@
         </div>
       </div>
 
-      <!-- captions / live -->
+      <!-- current question -->
       <div class="meet-tile rounded-2xl p-3 sm:p-4 min-h-[120px]">
         <div class="flex items-center justify-between">
-          <span class="text-[11px] tracking-widest uppercase font-semibold text-white/50">Live captions & feedback</span>
-          <span class="text-[11px] px-2 py-1 rounded-full bg-white/10 text-white/70 mono" id="captionHint">Listening…</span>
+          <span class="text-[11px] tracking-widest uppercase font-semibold text-white/50">Current question</span>
+          <span class="text-[11px] px-2 py-1 rounded-full bg-white/10 text-white/70 mono" id="questionBadge">Q 1 / 6</span>
         </div>
-        <div id="liveTranscript" class="text-sm leading-relaxed text-white mt-2">We’ll start with a short intro, then your first question. Speak naturally after you hear each question.</div>
-        <div id="feedbackLine" class="hidden mt-3 p-3 rounded-xl bg-indigo-500/20 border border-indigo-400/30 text-sm text-indigo-100">
-          <span class="font-semibold text-white">Feedback:</span> <span id="feedbackText"></span>
-          <div class="text-xs text-indigo-200 mt-1 font-medium">Let’s move to the next question →</div>
-        </div>
+        <div id="currentQuestion" class="text-sm leading-relaxed text-white mt-2">Waiting for the first question…</div>
       </div>
     </div>
 
@@ -311,7 +307,6 @@
   <div class="sticky bottom-0 bg-[#202124] border-t border-white/10 px-4 py-3 flex items-center justify-center gap-3">
     <button id="muteBtn" class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 flex items-center justify-center text-white hover:bg-white/10" title="Mute">🎙️</button>
     <button id="camBtn" class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 flex items-center justify-center text-white hover:bg-white/10" title="Camera">📹</button>
-    <button id="captionsBtn" class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 flex items-center justify-center text-white hover:bg-white/10" title="Captions">💬</button>
     <button id="endBtn" class="px-6 h-12 rounded-full bg-[#ea4335] text-white font-semibold hover:bg-red-600 flex items-center gap-2">✕ End</button>
     <button class="w-12 h-12 rounded-full bg-[#3c4043] border border-white/10 hidden sm:flex items-center justify-center text-white">⋯</button>
   </div>
@@ -377,6 +372,9 @@ let currentIdx=0;
 let resumeCache='', jdCache='';
 let camOn=true;
 let isGenerating=false;
+let progressIv=null;
+let interviewEnded=false;
+let reportInFlight=false;
 
 function toast(msg, ms=3000){ const t=$('toast'); t.textContent=msg; t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),ms); }
 
@@ -413,10 +411,11 @@ function restartFlow(){
   if(pc) try{pc.close()}catch{}
   clearInterval(timerIv);
   remaining=600; pc=null; pcId=null; sessionId=null; currentIdx=0;
+  stopProgressSync();
+  interviewEnded=false; reportInFlight=false;
   showUpload();
   // reset UI
-  $('liveTranscript').textContent='We’ll start with a short intro, then your first question. Speak naturally after you hear each question.';
-  $('feedbackLine').classList.add('hidden');
+  applyProgress({ current_index:0, total:totalQs, question:'Waiting for the first question…', done:false });
   $('headerStatus')&&($('statusText').textContent='Idle');
 }
 function setStep(n){
@@ -430,14 +429,73 @@ function setStep(n){
 }
 function buildProgressDots(){
   const c=$('progressDots'); if(!c) return; c.innerHTML='';
+  const displayIdx = Math.min(currentIdx, Math.max(totalQs-1, 0));
   for(let i=0;i<totalQs;i++){
     const d=document.createElement('div');
-    d.className='w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border ' + (i===currentIdx ? 'bg-indigo-600 text-white border-indigo-600' : i<currentIdx ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white/10 text-white/60 border-white/20');
+    d.className='w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold border ' + (i===displayIdx ? 'bg-indigo-600 text-white border-indigo-600' : i<displayIdx ? 'bg-zinc-900 text-white border-zinc-900' : 'bg-white/10 text-white/60 border-white/20');
     d.textContent=i+1; c.appendChild(d);
   }
-  const pct = totalQs? (currentIdx/totalQs*100):0;
-  $('progressBar').style.width=pct+'%';
-  $('progressText').textContent=`Question ${Math.min(currentIdx+1,totalQs)} of ${totalQs}`;
+  const pct = totalQs? (Math.min(currentIdx+1, totalQs)/totalQs*100):0;
+  if($('progressBar')) $('progressBar').style.width=pct+'%';
+  if($('progressText')) $('progressText').textContent=`Question ${Math.min(currentIdx+1,totalQs)} of ${totalQs}`;
+  const label = `Q ${Math.min(currentIdx+1,totalQs)} / ${totalQs}`;
+  if($('meetProgress')) $('meetProgress').textContent=label;
+  if($('questionBadge')) $('questionBadge').textContent=label;
+}
+
+function applyProgress(p){
+  if(!p || typeof p !== 'object') return;
+  if(p.data && typeof p.data === 'object' && (p.data.question!=null || p.data.current_index!=null)) p=p.data;
+  if(typeof p.total === 'number' && p.total>0) totalQs=p.total;
+  const done = !!p.done;
+  currentIdx = done ? totalQs : (typeof p.current_index==='number' ? p.current_index : currentIdx);
+  buildProgressDots();
+  const qEl=$('currentQuestion');
+  if(!qEl) return;
+  if(done){
+    qEl.textContent='Interview complete — wrapping up…';
+    if($('meetProgress')) $('meetProgress').textContent='Done';
+    if($('questionBadge')) $('questionBadge').textContent='Done';
+    if($('progressBar')) $('progressBar').style.width='100%';
+    if($('progressText')) $('progressText').textContent=`Question ${totalQs} of ${totalQs}`;
+  } else if(typeof p.question === 'string' && p.question.trim()){
+    qEl.textContent=p.question.trim();
+  }
+}
+
+function interviewApiBases(){
+  return [location.origin, 'http://localhost:8000', 'http://127.0.0.1:8000'];
+}
+
+function stopProgressSync(){
+  if(progressIv){ clearInterval(progressIv); progressIv=null; }
+}
+
+function startProgressSync(){
+  stopProgressSync();
+  const tick=async ()=>{
+    if(!sessionId) return;
+    for(const base of interviewApiBases()){
+      try{
+        const r=await fetch(`${base}/api/interview/${sessionId}/progress`);
+        if(r.ok){ applyProgress(await r.json()); return; }
+      }catch{}
+    }
+  };
+  tick();
+  progressIv=setInterval(tick, 1500);
+}
+
+function handleDataChannelMessage(raw){
+  let m=raw;
+  if(typeof raw === 'string'){
+    try{ m=JSON.parse(raw); }catch{ return; }
+  }
+  if(!m || typeof m !== 'object') return;
+  const type=m.type || m.label;
+  if(type==='interview_progress' || (m.current_index!=null && ('question' in m || 'done' in m))){
+    applyProgress(m);
+  }
 }
 function renderResults(score, evaluations, opts={}){
   const sEl=$('finalScore');
@@ -679,21 +737,19 @@ async function startVoiceWithCache(){
 
   try{
     startTimer();
-    currentIdx=0; buildProgressDots();
-    $('liveTranscript').textContent='Connecting to voice agent… allow microphone if prompted.';
+    currentIdx=0; interviewEnded=false; buildProgressDots();
+    applyProgress({ current_index:0, total:totalQs, question:'Connecting to voice agent… allow microphone if prompted.', done:false });
     $('meetStatus').textContent='Connecting…';
 
     pc = new RTCPeerConnection({ iceServers:[{urls:'stun:stun.l.google.com:19302'}] });
     // FIX: create data channel before offer — pipecat SmallWebRTC expects client-initiated channel
-    // Without this, server logs "Data channel not established within 10s" and RTVI msgs are dropped
     try{
       dc = pc.createDataChannel("rtvi", {ordered:true});
       dc.onopen = ()=> console.log("[webrtc] data channel open");
       dc.onclose = ()=> console.log("[webrtc] data channel closed");
       dc.onmessage = (e)=> {
-        try{ const m=JSON.parse(e.data); console.log("[webrtc] dc message", m); }
-        catch{ console.log("[webrtc] dc raw", e.data); }
-        if(e.data && e.data.startsWith && e.data.startsWith("ping")){ /* keepalive */ }
+        try{ const m=JSON.parse(e.data); console.log("[webrtc] dc message", m); handleDataChannelMessage(m); }
+        catch{ handleDataChannelMessage(e.data); }
       };
       dc.onerror = (e)=> console.warn("[webrtc] dc error", e);
     }catch(e){ console.warn("createDataChannel failed", e); }
@@ -702,10 +758,9 @@ async function startVoiceWithCache(){
       if($('aiSpeakingBadge')) $('aiSpeakingBadge').classList.remove('hidden');
       if($('aiAvatar')) $('aiAvatar').classList.add('ring-4','ring-indigo-400/30');
       const pulseA=$('pulseA'), pulseB=$('pulseB'); if(pulseA) pulseA.classList.remove('hidden'); if(pulseB) pulseB.classList.remove('hidden');
-      if($('captionHint')) $('captionHint').textContent='Agent speaking';
     };
     pc.onconnectionstatechange = ()=> {
-      if(pc.connectionState==='connected'){ setStatus('Live — interview in progress','green'); if($('aiSub')) $('aiSub').textContent='Listening — answer the question'; if($('captionHint')) $('captionHint').textContent='Listening'; if($('aiAvatar')) $('aiAvatar').classList.remove('ring-4'); }
+      if(pc.connectionState==='connected'){ setStatus('Live — interview in progress','green'); if($('aiSub')) $('aiSub').textContent='Listening — answer the question'; if($('aiAvatar')) $('aiAvatar').classList.remove('ring-4'); }
       if(pc.connectionState==='failed' || pc.connectionState==='disconnected'){ setStatus('Disconnected','red'); if($('aiSub')) $('aiSub').textContent='Connection lost'; $('reconnectBtn').classList.remove('hidden'); $('runnerHint').classList.remove('hidden'); const rh=$('runnerHintMeet'); if(rh) rh.classList.remove('hidden'); }
     };
     let pendingCandidates=[];
@@ -749,62 +804,16 @@ async function startVoiceWithCache(){
     }
     pendingCandidates=[];
 
-    $('liveTranscript').textContent='Voice connected. You’ll hear a short intro + your first screening question. Please answer each question naturally — I’ll move to the next question when you’re done.';
+    startProgressSync();
     setStatus('Live — interview in progress','green');
     if($('aiSub')) $('aiSub').textContent='Interview in progress — speak after each question';
-    // simulate progress advancing on track events (real feedback moves via InterviewProcessor voice)
     pc.addEventListener('track', ()=> setTimeout(()=> { const a=$('aiAvatar'); if(a) a.classList.remove('ring-4'); const b=$('aiSpeakingBadge'); if(b) b.classList.add('hidden'); }, 800));
 
-    // Single authoritative report path — avoids duplicate Gemini evals
-    let ended=false;
-    let reportInFlight=false;
-    async function fetchReportOnce(){
-      if(!sessionId) return { score:null, evals:null, incomplete:false, raw:null };
-      const bases = [location.origin, 'http://localhost:8000', 'http://127.0.0.1:8000'];
-      for(const base of bases){
-        try{
-          const r = await fetch(`${base}/api/interview/${sessionId}/report`, { method:'POST' });
-          if(r.ok){ const j=await r.json(); return { score:j.final_score, evals:j.evaluations, incomplete:false, raw:j }; }
-          if(r.status===400){
-            const t=await r.text();
-            console.warn('report not ready (incomplete):', t);
-            // Interview abandoned — fetch stored state but do NOT treat as completed report
-            for(const b2 of bases){
-              try{ const g=await fetch(`${b2}/api/interview/${sessionId}`); if(g.ok){ const j=await g.json(); return { score:null, evals:j.evaluations, incomplete:true, raw:j, msg:t }; } }catch{}
-            }
-            return { score:null, evals:null, incomplete:true, raw:null, msg:t };
-          }
-        }catch(e){ console.warn('report POST failed at', base, e); }
-      }
-      for(const base of bases){
-        try{
-          const r=await fetch(`${base}/api/interview/${sessionId}`);
-          if(r.ok){ const j=await r.json(); const incomplete = !j.is_complete; return { score: incomplete? null : j.final_score, evals:j.evaluations, incomplete, raw:j }; }
-        }catch{}
-      }
-      return { score:null, evals:null, incomplete:false, raw:null };
-    }
-    async function generateAndShowReport(){
-      if(reportInFlight) return;
-      reportInFlight=true;
-      $('liveTranscript').textContent='Interview ended — generating your detailed report…';
-      setStatus('Generating report…','amber');
-      const { score, evals, incomplete, raw } = await fetchReportOnce();
-      if(incomplete){
-        // Abandoned: do not show final score as if completed
-        const answered = raw?.answers?.length ?? raw?.raw?.answers?.length ?? '?';
-        const total = raw?.questions?.length ?? totalQs;
-        toast(`Interview ended before completion (${answered}/${total}) — no final score`);
-        showResults(null, evals, { incomplete:true, msg:`Interview ended before completion (${answered}/${total} answered). Complete all 6 questions for a final score.` });
-      } else {
-        showResults(score, evals);
-      }
-      reportInFlight=false;
-    }
     const checkEnd=()=>{
-      if(ended) return;
+      if(interviewEnded) return;
       if(pc.connectionState==='closed' || pc.connectionState==='failed'){
-        ended=true;
+        interviewEnded=true;
+        stopProgressSync();
         setTimeout(()=> generateAndShowReport(), 800);
       }
     };
@@ -815,17 +824,62 @@ async function startVoiceWithCache(){
     console.error(e);
     setStatus('Failed','red');
     if($('aiSub')) $('aiSub').textContent='Connection failed';
-    $('liveTranscript').textContent = e.message + ' — is python server/bot.py running on '+ (runnerBase||'7860') +'?';
+    applyProgress({ current_index:currentIdx, total:totalQs, question: e.message + ' — is python server/bot.py running on '+ (runnerBase||'7860') +'?', done:false });
     $('runnerHint').classList.remove('hidden'); const rh=$('runnerHintMeet'); if(rh) rh.classList.remove('hidden');
     toast(e.message);
     if(pc) try{pc.close();}catch{}
   }
 }
 
+async function fetchReportOnce(){
+  if(!sessionId) return { score:null, evals:null, incomplete:false, raw:null };
+  const bases = interviewApiBases();
+  for(const base of bases){
+    try{
+      const r = await fetch(`${base}/api/interview/${sessionId}/report`, { method:'POST' });
+      if(r.ok){ const j=await r.json(); return { score:j.final_score, evals:j.evaluations, incomplete:false, raw:j }; }
+      if(r.status===400){
+        const t=await r.text();
+        console.warn('report not ready (incomplete):', t);
+        for(const b2 of bases){
+          try{ const g=await fetch(`${b2}/api/interview/${sessionId}`); if(g.ok){ const j=await g.json(); return { score:null, evals:j.evaluations, incomplete:true, raw:j, msg:t }; } }catch{}
+        }
+        return { score:null, evals:null, incomplete:true, raw:null, msg:t };
+      }
+    }catch(e){ console.warn('report POST failed at', base, e); }
+  }
+  for(const base of bases){
+    try{
+      const r=await fetch(`${base}/api/interview/${sessionId}`);
+      if(r.ok){ const j=await r.json(); const incomplete = !j.is_complete; return { score: incomplete? null : j.final_score, evals:j.evaluations, incomplete, raw:j }; }
+    }catch{}
+  }
+  return { score:null, evals:null, incomplete:false, raw:null };
+}
+
+async function generateAndShowReport(){
+  if(reportInFlight) return;
+  reportInFlight=true;
+  stopProgressSync();
+  applyProgress({ current_index:currentIdx, total:totalQs, question:'Interview ended — generating your detailed report…', done:false });
+  setStatus('Generating report…','amber');
+  const { score, evals, incomplete, raw } = await fetchReportOnce();
+  if(incomplete){
+    const answered = raw?.answers?.length ?? raw?.raw?.answers?.length ?? '?';
+    const total = raw?.questions?.length ?? totalQs;
+    toast(`Interview ended before completion (${answered}/${total}) — no final score`);
+    showResults(null, evals, { incomplete:true, msg:`Interview ended before completion (${answered}/${total} answered). Complete all 6 questions for a final score.` });
+  } else {
+    showResults(score, evals);
+  }
+  reportInFlight=false;
+}
+
 async function endInterview(){
   if(pc) try{pc.close()}catch{};
   setStatus('Ended','zinc'); if($('aiSub')) $('aiSub').textContent='Interview ended — generating report…'; clearInterval(timerIv);
-  ended=true;
+  interviewEnded=true;
+  stopProgressSync();
   await generateAndShowReport();
   toast('Interview ended');
 }
@@ -842,7 +896,6 @@ $('muteBtn').addEventListener('click', ()=>{
   const mic=$('selfMicIcon'); if(mic) mic.textContent= muted?'🔇':'🎙️';
   const part=$('partMic'); if(part) part.textContent= muted?'🔇':'🎙️';
   if($('aiSub')) $('aiSub').textContent = muted ? 'Microphone muted' : 'Listening…';
-  if($('captionHint')) $('captionHint').textContent = muted ? 'Muted' : 'Listening…';
 });
 $('camBtn').addEventListener('click', ()=>{
   camOn=!camOn;
@@ -850,11 +903,6 @@ $('camBtn').addEventListener('click', ()=>{
   $('camBtn').classList.toggle('bg-[#3c4043]', camOn);
   $('camBtn').textContent = camOn ? '📹' : '🚫';
   toast(camOn ? 'Camera on' : 'Camera off');
-});
-$('captionsBtn').addEventListener('click', ()=>{
-  const cap=$('liveTranscript').parentElement;
-  cap.classList.toggle('hidden');
-  toast(cap.classList.contains('hidden') ? 'Captions hidden' : 'Captions shown');
 });
 
 // expose for inline handlers

@@ -302,6 +302,24 @@ async def generate_report(session_id: str):
         }
 
 
+@app.get("/api/interview/{session_id}/progress")
+async def get_interview_progress(session_id: str):
+    """Live UI snapshot: current question only (does not leak remaining questions)."""
+    state = _get_session(session_id)
+    if not state:
+        raise HTTPException(404, "Session not found")
+    q = state.get_current_question()
+    done = state.is_interview_complete()
+    return {
+        "type": "interview_progress",
+        "done": done,
+        "current_index": state.current_question_index,
+        "total": len(state.questions),
+        "question": None if done or q is None else q.get("question"),
+        "question_id": None if not q else q.get("id"),
+    }
+
+
 @app.get("/api/interview/{session_id}")
 async def get_interview(session_id: str):
     state = _get_session(session_id)

@@ -14,6 +14,7 @@ from pipecat.frames.frames import (
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
     TTSSpeakFrame,
+    OutputTransportMessageUrgentFrame,
 )
 
 from pipecat.processors.frame_processor import (
@@ -123,6 +124,33 @@ class InterviewProcessor(FrameProcessor):
             self._debounce_task.cancel()
             self._debounce_task = None
 
+    def _progress_payload(self, next_question):
+        total = len(self.state.questions)
+        if next_question is None:
+            return {
+                "type": "interview_progress",
+                "done": True,
+                "current_index": total,
+                "total": total,
+                "question": None,
+                "question_id": None,
+            }
+        return {
+            "type": "interview_progress",
+            "done": False,
+            "current_index": self.state.current_question_index,
+            "total": total,
+            "question": next_question.get("question"),
+            "question_id": next_question.get("id"),
+        }
+
+    async def _push_ui_progress(self, next_question):
+        """Notify the browser of the current question over the WebRTC data channel."""
+        await self.push_frame(
+            OutputTransportMessageUrgentFrame(message=self._progress_payload(next_question)),
+            FrameDirection.DOWNSTREAM,
+        )
+
     async def _push_result(self, next_question):
         """Push next question or closing message as ONE atomic TTS utterance.
 
@@ -134,6 +162,7 @@ class InterviewProcessor(FrameProcessor):
         audio).
         """
         self._clear_stale_stt()
+        await self._push_ui_progress(next_question)
         if next_question is None:
             self.interview_finished = True
             final_message = "Thank you. That concludes the interview."

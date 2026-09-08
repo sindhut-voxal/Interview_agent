@@ -16,7 +16,7 @@ logger.add(
 from interview.controller import InterviewController
 from interview_processor import InterviewProcessor
 
-from pipecat.frames.frames import TTSSpeakFrame
+from pipecat.frames.frames import TTSSpeakFrame, OutputTransportMessageUrgentFrame
 
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker, PipelineParams
@@ -207,6 +207,18 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
             _norm = lambda x: x.strip()
         q1_text = _norm(first_question["question"])
         logger.info(f"Queueing Q1 as atomic TTSSpeakFrame ({len(q1_text)} chars)")
+        await worker.queue_frame(
+            OutputTransportMessageUrgentFrame(
+                message={
+                    "type": "interview_progress",
+                    "done": False,
+                    "current_index": state.current_question_index,
+                    "total": len(state.questions),
+                    "question": first_question.get("question"),
+                    "question_id": first_question.get("id"),
+                }
+            )
+        )
         await worker.queue_frame(TTSSpeakFrame(text=q1_text, append_to_context=False))
 
     @transport.event_handler("on_client_disconnected")

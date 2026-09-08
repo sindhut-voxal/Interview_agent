@@ -18,7 +18,7 @@ from interview.state import InterviewState
 from interview.controller import InterviewController
 from interview_processor import InterviewProcessor
 
-from pipecat.frames.frames import TTSSpeakFrame, TextFrame
+from pipecat.frames.frames import TTSSpeakFrame, TextFrame, OutputTransportMessageUrgentFrame
 
 
 def make_state(num=6):
@@ -43,7 +43,15 @@ class CapturingProcessor(InterviewProcessor):
         if direction is None:
             direction = FrameDirection.DOWNSTREAM
         self.captured.append((frame, direction))
-        # also record for inspection, don't call super
+        # don't call super
+
+
+def tts_frames(proc):
+    return [f for f, _ in proc.captured if isinstance(f, TTSSpeakFrame)]
+
+
+def ui_frames(proc):
+    return [f for f, _ in proc.captured if isinstance(f, OutputTransportMessageUrgentFrame)]
 
 async def test_question_delivery_single_utterance():
     state = make_state(6)
@@ -57,8 +65,11 @@ async def test_question_delivery_single_utterance():
     # After answering Q1, next_question should be Q2 text only
     q2 = state.questions[1]
     await proc._push_result(q2)
-    assert len(proc.captured) == 1, f"Q2 expected 1 frame, got {len(proc.captured)}: {proc.captured}"
-    frame, direction = proc.captured[0]
+    tts = tts_frames(proc)
+    ui = ui_frames(proc)
+    assert len(tts) == 1, f"Q2 expected 1 TTSSpeakFrame, got {len(tts)}: {proc.captured}"
+    assert len(ui) == 1, f"Q2 expected 1 UI progress frame, got {len(ui)}"
+    frame = tts[0]
     assert isinstance(frame, TTSSpeakFrame), f"Q2 frame must be TTSSpeakFrame, got {type(frame).__name__}"
     assert not isinstance(frame, TextFrame) or isinstance(frame, TTSSpeakFrame)  # ensure not plain TextFrame
     text = frame.text
@@ -66,6 +77,8 @@ async def test_question_delivery_single_utterance():
     assert "Thanks for your answer" not in text, f"Q2 must not contain transition, got: {text}"
     assert "Let's move to the next question" not in text, f"Q2 must not contain transition, got: {text}"
     assert text == q2["question"], f"Q2 text must be exactly question text, got: {text!r} expected {q2['question']!r}"
+    assert ui[0].message.get("type") == "interview_progress"
+    assert ui[0].message.get("question") == q2["question"]
     proc.captured.clear()
 
     # Test Q3..Q6 similarly
@@ -75,8 +88,9 @@ async def test_question_delivery_single_utterance():
         state.current_question_index = idx
         proc.captured.clear()
         await proc._push_result(q)
-        assert len(proc.captured) == 1, f"Q{idx+1} expected 1 frame, got {len(proc.captured)}"
-        frame, _ = proc.captured[0]
+        tts = tts_frames(proc)
+        assert len(tts) == 1, f"Q{idx+1} expected 1 TTSSpeakFrame, got {len(tts)}"
+        frame = tts[0]
         assert isinstance(frame, TTSSpeakFrame), f"Q{idx+1} must be TTSSpeakFrame"
         assert frame.text == q["question"], f"Q{idx+1} text mismatch"
         assert "Thanks" not in frame.text
@@ -93,10 +107,13 @@ async def test_question_delivery_single_utterance():
         return {"evaluations": [], "final_score": 0}
     proc.controller.evaluate_interview = fake_evaluate
     await proc._push_result(None)
-    assert len(proc.captured) == 1, f"Final expected 1 frame, got {len(proc.captured)}"
-    frame, _ = proc.captured[0]
+    tts = tts_frames(proc)
+    ui = ui_frames(proc)
+    assert len(tts) == 1, f"Final expected 1 TTSSpeakFrame, got {len(tts)}"
+    frame = tts[0]
     assert isinstance(frame, TTSSpeakFrame), f"Final must be TTSSpeakFrame, got {type(frame)}"
     assert frame.text == "Thank you. That concludes the interview.", f"Final message must be exact, got: {frame.text!r}"
+    assert ui and ui[0].message.get("done") is True
     assert proc.interview_finished is True
     # Ensure report triggered exactly once (allow background task to run)
     await asyncio.sleep(0.05)
@@ -124,15 +141,19 @@ async def test_no_transition_in_any_question():
         await proc._push_result(next_q)
         if next_q is None:
             # final
-            assert len(proc.captured) == 1
-            assert proc.captured[0][0].text == "Thank you. That concludes the interview."
+            tts = tts_frames(proc)
+            assert len(tts) == 1
+            assert tts[0].text == "Thank you. That concludes the interview."
         else:
-            assert len(proc.captured) == 1
-            f = proc.captured[0][0]
+            tts = tts_frames(proc)
+            assert len(tts) == 1
+            f = tts[0]
             assert isinstance(f, TTSSpeakFrame)
             assert f.text == next_q["question"]
             assert "Thanks" not in f.text
             assert "Let's" not in f.text
+            ui = ui_frames(proc)
+            assert ui and ui[0].message.get("question") == next_q["question"]
     print("PASS: full interview loop no filler")
 
 async def test_bot_q1_single_utterance():
