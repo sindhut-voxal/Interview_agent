@@ -155,7 +155,7 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
             model="nova-3",
             language="en",
             interim_results=True,
-            endpointing=700,
+            endpointing=400,
             smart_format=True,
             punctuate=True,
         ),

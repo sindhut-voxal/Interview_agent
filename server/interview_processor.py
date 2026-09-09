@@ -24,7 +24,7 @@ from pipecat.processors.frame_processor import (
 
 from interview.controller import InterviewController
 from interview.state import InterviewState
-from session_store import save_session
+from session_store import save_session, acquire_report_lock, release_report_lock
 
 # Inline lightweight normalization so we don't depend on LLMTextFrame path.
 # Reuse text_normaliser.normalize_for_tts if available.
@@ -42,7 +42,7 @@ class InterviewProcessor(FrameProcessor):
         controller: InterviewController,
         state: InterviewState,
         session_id: str | None = None,
-        debounce_s: float = 1.8,
+        debounce_s: float = 0.6,
         min_chars: int = 3,
     ):
         super().__init__()
@@ -199,21 +199,40 @@ class InterviewProcessor(FrameProcessor):
 
     async def _trigger_report(self):
         """Background batch evaluation after interview completes. Idempotent."""
+        sid = self.session_id
+        locked = False
         try:
-            # Avoid duplicate generation if evaluations already exist.
-            if self.state.evaluations and self.state.final_score is not None:
+            if self.state.evaluations and self.state.final_score is not None and len(self.state.evaluations) >= len(self.state.answers):
                 logger.info("Report already generated — skipping background evaluation")
                 return
-            logger.info(f"Starting post-interview batch evaluation for session {self.session_id or 'unknown'}")
+            if sid and not acquire_report_lock(sid):
+                logger.info(f"Report lock held for {sid} — skipping duplicate background evaluation")
+                return
+            locked = bool(sid)
+            logger.info(f"Starting post-interview batch evaluation for session {sid or 'unknown'}")
+            self.state.report_status = "running"
+            if sid:
+                save_session(sid, self.state)
             await self.controller.evaluate_interview(self.state)
-            if self.session_id:
+            self.state.report_status = "ready"
+            if sid:
                 try:
-                    save_session(self.session_id, self.state)
+                    save_session(sid, self.state)
                 except Exception as e:
                     logger.warning(f"Failed to persist session after report: {e}")
             logger.info(f"Batch report generated — final_score={self.state.final_score}")
         except Exception as e:
+            self.state.report_status = "error"
+            self.state.report_error = str(e)
+            if sid:
+                try:
+                    save_session(sid, self.state)
+                except Exception:
+                    pass
             logger.exception(f"Background report generation failed: {e}")
+        finally:
+            if locked and sid:
+                release_report_lock(sid)
 
     async def _on_tts_started(self):
         if self._guard_task and not self._guard_task.done():

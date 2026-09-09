@@ -27,6 +27,7 @@ from pipecat.processors.aggregators.llm_context import (
 from pipecat.services.google.llm import GoogleLLMService
 
 from interview.prompts import QUESTION_GENERATION_PROMPT
+from interview.llm_config import gemini_model
 
 
 load_dotenv()
@@ -123,7 +124,12 @@ def validate_questions(data) -> list:
         if not isinstance(q["criteria"], list) or not (2 <= len(q["criteria"]) <= 4):
             raise ValueError(f"Question criteria must be 2-4 items: {q}")
         try:
+            q["id"] = int(q["id"])
+        except Exception:
+            raise ValueError(f"Invalid question id: {q.get('id')}")
+        try:
             w = int(q["weight"])
+            q["weight"] = w
             if w <= 0:
                 raise ValueError
         except Exception:
@@ -160,10 +166,10 @@ async def generate_questions(
 ):
     logger.info("Starting question generation")
     prompt = QUESTION_GENERATION_PROMPT.format(resume=resume, job_description=job_description)
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+    model = gemini_model()
 
     logger.info(f"QuestionGen model={model}")
-    raw = await _generate_once(prompt, model, timeout=30)
+    raw = await _generate_once(prompt, model, timeout=45)
     logger.info(f"Raw LLM response (model={model}):\n{raw}")
     data = parse_json_response(raw)
     questions = validate_questions(data)

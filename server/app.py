@@ -18,7 +18,7 @@ load_dotenv()
 
 from interview.controller import InterviewController
 from interview.state import InterviewState
-from session_store import save_session, load_session
+from session_store import save_session, load_session, acquire_report_lock, release_report_lock
 
 app = FastAPI(title="Voxal — 10-min Screening Interview")
 
@@ -261,45 +261,130 @@ async def submit_answer(session_id: str, payload: dict):
     }
 
 
+def _report_payload(session_id: str, state: InterviewState) -> dict:
+    strengths = []
+    improvements = []
+    for ev in state.evaluations or []:
+        strengths.extend(ev.get("strengths") or [])
+        improvements.extend(ev.get("improvements") or [])
+
+    def dedupe(seq):
+        seen = set()
+        out = []
+        for x in seq:
+            if x not in seen:
+                seen.add(x)
+                out.append(x)
+        return out
+
+    return {
+        "session_id": session_id,
+        "status": getattr(state, "report_status", "idle") or "idle",
+        "is_complete": state.is_interview_complete(),
+        "answered": len(state.answers),
+        "total": len(state.questions),
+        "final_score": state.final_score,
+        "evaluations": state.evaluations,
+        "answers": state.answers,
+        "questions": state.questions,
+        "strengths": dedupe(strengths)[:5],
+        "improvements": dedupe(improvements)[:5],
+        "error": getattr(state, "report_error", None),
+    }
+
+
+def _report_is_ready(state: InterviewState) -> bool:
+    return bool(
+        state.evaluations
+        and state.final_score is not None
+        and len(state.evaluations) >= len(state.answers)
+        and len(state.answers) >= len(state.questions)
+    )
+
+
+async def _run_report(session_id: str, state: InterviewState) -> dict:
+    state.report_status = "running"
+    state.report_error = None
+    save_session(session_id, state)
+    try:
+        report = await controller.evaluate_interview(state)
+        state.report_status = "ready"
+        save_session(session_id, state)
+        payload = _report_payload(session_id, state)
+        payload["status"] = "ready"
+        payload["final_score"] = report["final_score"]
+        payload["evaluations"] = report["evaluations"]
+        payload["strengths"] = report.get("strengths", [])
+        payload["improvements"] = report.get("improvements", [])
+        return payload
+    except Exception as e:
+        state.report_status = "error"
+        state.report_error = str(e)
+        save_session(session_id, state)
+        raise
+
+
+@app.get("/api/interview/{session_id}/report")
+async def get_report(session_id: str):
+    """Pollable report snapshot. Does not start evaluation."""
+    state = _get_session(session_id)
+    if not state:
+        raise HTTPException(404, "Session not found")
+    payload = _report_payload(session_id, state)
+    if _report_is_ready(state):
+        payload["status"] = "ready"
+    elif not state.is_interview_complete():
+        payload["status"] = "incomplete"
+    elif getattr(state, "report_status", "idle") == "error":
+        payload["status"] = "error"
+    elif getattr(state, "report_status", "idle") == "running":
+        payload["status"] = "running"
+    else:
+        payload["status"] = "pending"
+    return payload
+
+
 @app.post("/api/interview/{session_id}/report")
 async def generate_report(session_id: str):
     """
     POST-INTERVIEW: batch Gemini evaluation for all stored answers.
-    Call after is_complete. Returns detailed report.
+    Call after is_complete. Returns detailed report, or 202 if already running.
     """
+    state = _get_session(session_id)
+    if not state:
+        raise HTTPException(404, "Session not found")
+
+    if not state.is_interview_complete():
+        raise HTTPException(
+            400,
+            f"Interview not complete: {len(state.answers)}/{len(state.questions)} answered. Finish all questions first.",
+        )
+
+    if _report_is_ready(state):
+        payload = _report_payload(session_id, state)
+        payload["status"] = "ready"
+        return payload
+
     lock = _report_locks.setdefault(session_id, asyncio.Lock())
+    if lock.locked() or not acquire_report_lock(session_id):
+        return JSONResponse(content={**_report_payload(session_id, state), "status": "running"}, status_code=202)
+
     async with lock:
-        state = _get_session(session_id)
-        if not state:
-            raise HTTPException(404, "Session not found")
-
-        if not state.is_interview_complete():
-            raise HTTPException(400, f"Interview not complete: {len(state.answers)}/{len(state.questions)} answered. Finish all questions first.")
-
-        if state.evaluations and state.final_score is not None:
-            return {
-                "final_score": state.final_score,
-                "evaluations": state.evaluations,
-                "answers": state.answers,
-                "questions": state.questions,
-            }
-
-        logger.info(f"Generating batch report for {session_id} ({len(state.answers)} answers)")
         try:
-            report = await controller.evaluate_interview(state)
-            save_session(session_id, state)
+            state = _get_session(session_id) or state
+            if _report_is_ready(state):
+                payload = _report_payload(session_id, state)
+                payload["status"] = "ready"
+                return payload
+            logger.info(f"Generating batch report for {session_id} ({len(state.answers)} answers)")
+            return await _run_report(session_id, state)
+        except HTTPException:
+            raise
         except Exception as e:
             logger.exception(f"Report generation failed: {e}")
             raise HTTPException(500, f"Report generation failed: {e}")
-
-        return {
-            "final_score": report["final_score"],
-            "evaluations": report["evaluations"],
-            "strengths": report.get("strengths", []),
-            "improvements": report.get("improvements", []),
-            "answers": state.answers,
-            "questions": state.questions,
-        }
+        finally:
+            release_report_lock(session_id)
 
 
 @app.get("/api/interview/{session_id}/progress")

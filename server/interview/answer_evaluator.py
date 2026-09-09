@@ -29,6 +29,7 @@ from pipecat.processors.aggregators.llm_context import (
 from pipecat.services.google.llm import GoogleLLMService
 
 from interview.prompts import ANSWER_EVALUATION_PROMPT
+from interview.llm_config import gemini_model
 
 
 load_dotenv()
@@ -95,7 +96,21 @@ def parse_json_response(response: str):
     return json.loads(raw)
 
 
-async def _evaluate_once(prompt: str, model: str, timeout: int = 20) -> str:
+def _parse_score(raw, weight: int) -> int:
+    if isinstance(raw, bool):
+        raise ValueError(f"Invalid score: {raw}")
+    if isinstance(raw, (int, float)):
+        score = int(round(float(raw)))
+    else:
+        text = str(raw).strip()
+        match = re.match(r"(-?\d+(?:\.\d+)?)", text)
+        if not match:
+            raise ValueError(f"Invalid score: {raw}")
+        score = int(round(float(match.group(1))))
+    return max(0, min(score, weight))
+
+
+async def _evaluate_once(prompt: str, model: str, timeout: int = 45) -> str:
     llm = GoogleLLMService(
         api_key=os.getenv("GOOGLE_API_KEY"),
         settings=GoogleLLMService.Settings(model=model),
@@ -127,34 +142,32 @@ async def evaluate_answer(
         weight=question["weight"],
         answer=answer,
     )
-    model = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
-
-    logger.info(f"Evaluate model={model}")
-    raw = await _evaluate_once(prompt, model, timeout=20)
-
-    logger.info(f"Raw evaluation response:\n{raw}")
-
-    evaluation = parse_json_response(raw)
-
-    if not isinstance(evaluation, dict):
-        raise ValueError(f"Malformed evaluation JSON: {evaluation}")
-    for field in ("question_id", "score", "feedback", "strengths", "improvements"):
-        if field not in evaluation:
-            raise ValueError(f"Missing field '{field}' in evaluation: {evaluation}")
-    # score validation + clamping
-    try:
-        score = int(evaluation["score"])
-    except Exception:
-        raise ValueError(f"Invalid score: {evaluation.get('score')}")
+    model = gemini_model()
     weight = int(question.get("weight", 100))
-    score = max(0, min(score, weight))
-    evaluation["score"] = score
-    # ensure strengths/improvements are lists
-    if not isinstance(evaluation.get("strengths"), list):
-        evaluation["strengths"] = []
-    if not isinstance(evaluation.get("improvements"), list):
-        evaluation["improvements"] = []
-    if not isinstance(evaluation.get("feedback"), str):
-        evaluation["feedback"] = str(evaluation.get("feedback", ""))
-    evaluation["question_id"] = int(question["id"])
-    return evaluation
+    last_error = None
+    for attempt in range(3):
+        try:
+            logger.info(f"Evaluate model={model} attempt={attempt + 1} Q{question.get('id')}")
+            raw = await _evaluate_once(prompt, model, timeout=45)
+            logger.info(f"Raw evaluation response:\n{raw}")
+            evaluation = parse_json_response(raw)
+            if not isinstance(evaluation, dict):
+                raise ValueError(f"Malformed evaluation JSON: {evaluation}")
+            for field in ("question_id", "score", "feedback", "strengths", "improvements"):
+                if field not in evaluation:
+                    raise ValueError(f"Missing field '{field}' in evaluation: {evaluation}")
+            evaluation["score"] = _parse_score(evaluation["score"], weight)
+            if not isinstance(evaluation.get("strengths"), list):
+                evaluation["strengths"] = []
+            if not isinstance(evaluation.get("improvements"), list):
+                evaluation["improvements"] = []
+            if not isinstance(evaluation.get("feedback"), str):
+                evaluation["feedback"] = str(evaluation.get("feedback", ""))
+            evaluation["question_id"] = int(question["id"])
+            evaluation.pop("error", None)
+            return evaluation
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Evaluate attempt {attempt + 1} failed for Q{question.get('id')}: {e}")
+            await asyncio.sleep(0.4 * (attempt + 1))
+    raise last_error

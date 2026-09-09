@@ -216,6 +216,31 @@
   </div>
 </section>
 
+<!-- EVALUATING OVERLAY (post-interview report) -->
+<section id="evaluatingScreen" class="hidden fixed inset-0 z-50 bg-white/90 glass flex items-center justify-center p-4">
+  <div class="w-full max-w-lg bg-white rounded-[1.5rem] border border-zinc-200 shadow-2xl p-6 sm:p-8">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 flex items-center justify-center text-white">✦</div>
+      <div><div class="font-semibold">Evaluating your answers</div><div class="text-xs text-zinc-500">Scoring each response and preparing feedback</div></div>
+      <div class="ml-auto mono text-xs px-2 py-1 rounded-full bg-zinc-900 text-white" id="evalPercent">0%</div>
+    </div>
+
+    <div class="mt-6 h-2 rounded-full bg-zinc-100 overflow-hidden">
+      <div id="evalProgress" class="h-full bg-gradient-to-r from-indigo-600 to-violet-600 transition-all duration-500" style="width:0%"></div>
+    </div>
+
+    <div class="mt-6 space-y-3" id="evalSteps">
+      <div data-step="1" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">1</div><div><div class="text-sm font-medium">Collecting your answers</div><div class="text-xs text-zinc-500">Matching responses to each question</div></div><span class="ml-auto text-xs">…</span></div>
+      <div data-step="2" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">2</div><div><div class="text-sm font-medium">Scoring each question</div><div class="text-xs text-zinc-500">Checking clarity, relevance, and criteria</div></div><span class="ml-auto text-xs">…</span></div>
+      <div data-step="3" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">3</div><div><div class="text-sm font-medium">Writing feedback</div><div class="text-xs text-zinc-500">Strengths and areas to improve</div></div><span class="ml-auto text-xs">…</span></div>
+      <div data-step="4" class="flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60"><div class="w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs">4</div><div><div class="text-sm font-medium">Compiling your report</div><div class="text-xs text-zinc-500">Overall score and summary</div></div><span class="ml-auto text-xs">…</span></div>
+    </div>
+
+    <p class="text-xs text-zinc-500 mt-4 text-center">This usually takes 15–40 seconds. Please keep this tab open.</p>
+    <div id="evalErrorBox" class="hidden mt-4 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700"></div>
+  </div>
+</section>
+
 <!-- INTERVIEW SCREEN (Google Meet clone) -->
 <section id="interviewScreen" class="hidden flex-1 flex flex-col meet-bg min-h-[calc(100vh-56px)]">
   <!-- meet top bar -->
@@ -383,6 +408,7 @@ function hideAll(){
   $('homeScreen').classList.add('hidden');
   $('uploadScreen').classList.add('hidden');
   $('generatingScreen').classList.add('hidden');
+  $('evaluatingScreen') && $('evaluatingScreen').classList.add('hidden');
   $('interviewScreen').classList.add('hidden');
   $('resultsScreen').classList.add('hidden');
   $('globalHeader').classList.add('hidden');
@@ -399,6 +425,13 @@ function showGenerating(){
   $('generatingScreen').classList.remove('hidden');
 }
 function hideGenerating(){ $('generatingScreen').classList.add('hidden'); }
+function showEvaluating(){
+  const el=$('evaluatingScreen'); if(!el) return;
+  el.classList.remove('hidden');
+  $('evalErrorBox') && $('evalErrorBox').classList.add('hidden');
+  setEvalStep(1); setEvalProgress(8);
+}
+function hideEvaluating(){ $('evaluatingScreen') && $('evaluatingScreen').classList.add('hidden'); }
 function showInterview(){
   hideAll(); $('interviewScreen').classList.remove('hidden'); $('globalHeader').classList.remove('hidden');
   setStep(2); buildProgressDots(); window.scrollTo(0,0);
@@ -458,6 +491,11 @@ function applyProgress(p){
     if($('questionBadge')) $('questionBadge').textContent='Done';
     if($('progressBar')) $('progressBar').style.width='100%';
     if($('progressText')) $('progressText').textContent=`Question ${totalQs} of ${totalQs}`;
+    if(!reportInFlight && !interviewEnded){
+      interviewEnded=true;
+      stopProgressSync();
+      setTimeout(()=> generateAndShowReport(), 400);
+    }
   } else if(typeof p.question === 'string' && p.question.trim()){
     qEl.textContent=p.question.trim();
   }
@@ -537,8 +575,8 @@ function renderResults(score, evaluations, opts={}){
       list.appendChild(div);
     });
     // aggregate strengths/improvements
-    const allS=[...new Set(evaluations.flatMap(e=>e.strengths||[]))].slice(0,4);
-    const allI=[...new Set(evaluations.flatMap(e=>e.improvements||[]))].slice(0,4);
+    const allS=[...new Set([...(opts.strengths||[]), ...evaluations.flatMap(e=>e.strengths||[])])].slice(0,4);
+    const allI=[...new Set([...(opts.improvements||[]), ...evaluations.flatMap(e=>e.improvements||[])])].slice(0,4);
     if(allS.length) $('strengthsList').innerHTML=allS.map(s=>`<li>${s}</li>`).join('');
     if(allI.length) $('improvementsList').innerHTML=allI.map(s=>`<li>${s}</li>`).join('');
   } else {
@@ -638,6 +676,43 @@ function setGenStep(active){
   });
 }
 function setGenProgress(p){ $('genProgress').style.width=p+'%'; $('genPercent').textContent=Math.round(p)+'%'; }
+
+let evalAnimIv=null;
+function setEvalStep(active){
+  document.querySelectorAll('#evalSteps [data-step]').forEach(el=>{
+    const n=parseInt(el.dataset.step);
+    const circle=el.querySelector('div');
+    const badge=el.querySelector('span');
+    if(n<active){ el.className='flex gap-3 p-3 rounded-xl border bg-emerald-50 border-emerald-200'; circle.className='w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs'; circle.textContent='✓'; badge.textContent='done'; badge.className='ml-auto text-xs text-emerald-600 font-semibold'; el.style.opacity='1'; }
+    else if(n===active){ el.className='flex gap-3 p-3 rounded-xl border bg-indigo-50 border-indigo-200 shadow-sm'; circle.className='w-7 h-7 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xs animate-pulse'; circle.textContent=n; badge.textContent='…'; badge.className='ml-auto text-xs text-indigo-600'; el.style.opacity='1'; }
+    else { el.className='flex gap-3 p-3 rounded-xl border bg-white border-zinc-200 opacity-60'; circle.className='w-7 h-7 rounded-full bg-zinc-100 flex items-center justify-center text-xs'; circle.textContent=n; badge.textContent='…'; el.style.opacity='0.6'; }
+  });
+}
+function setEvalProgress(p){ if($('evalProgress')) $('evalProgress').style.width=p+'%'; if($('evalPercent')) $('evalPercent').textContent=Math.round(p)+'%'; }
+function startEvalAnim(){
+  let pct=8, step=1;
+  clearInterval(evalAnimIv);
+  evalAnimIv=setInterval(()=>{
+    pct=Math.min(90, pct + Math.random()*5);
+    setEvalProgress(pct);
+    if(pct>22 && step===1){ step=2; setEvalStep(2); }
+    else if(pct>48 && step===2){ step=3; setEvalStep(3); }
+    else if(pct>72 && step===3){ step=4; setEvalStep(4); }
+  }, 700);
+}
+function stopEvalAnim(complete=false){
+  clearInterval(evalAnimIv); evalAnimIv=null;
+  if(complete){
+    setEvalStep(5); setEvalProgress(100);
+    document.querySelectorAll('#evalSteps [data-step]').forEach(el=>{
+      el.className='flex gap-3 p-3 rounded-xl border bg-emerald-50 border-emerald-200'; el.style.opacity='1';
+      const circle=el.querySelector('div'); const badge=el.querySelector('span');
+      if(circle){ circle.className='w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs'; circle.textContent='✓'; }
+      if(badge){ badge.textContent='done'; badge.className='ml-auto text-xs text-emerald-600 font-semibold'; }
+    });
+  }
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
 async function handleGenerate(){
   if(isGenerating) return;
@@ -831,47 +906,104 @@ async function startVoiceWithCache(){
   }
 }
 
-async function fetchReportOnce(){
-  if(!sessionId) return { score:null, evals:null, incomplete:false, raw:null };
-  const bases = interviewApiBases();
-  for(const base of bases){
+async function fetchApi(path, opts={}){
+  let last=null;
+  for(const base of interviewApiBases()){
     try{
-      const r = await fetch(`${base}/api/interview/${sessionId}/report`, { method:'POST' });
-      if(r.ok){ const j=await r.json(); return { score:j.final_score, evals:j.evaluations, incomplete:false, raw:j }; }
-      if(r.status===400){
-        const t=await r.text();
-        console.warn('report not ready (incomplete):', t);
-        for(const b2 of bases){
-          try{ const g=await fetch(`${b2}/api/interview/${sessionId}`); if(g.ok){ const j=await g.json(); return { score:null, evals:j.evaluations, incomplete:true, raw:j, msg:t }; } }catch{}
-        }
-        return { score:null, evals:null, incomplete:true, raw:null, msg:t };
+      const r=await fetch(`${base}${path}`, opts);
+      const text=await r.text();
+      let json=null;
+      try{ json=JSON.parse(text); }catch{}
+      last={ ok:r.ok, status:r.status, json, text, base };
+      if(r.status===404 || r.status===405) continue;
+      if(json) return last;
+    }catch(e){ console.warn('fetch failed', base, path, e); }
+  }
+  return last;
+}
+
+function reportLooksReady(j){
+  return !!(j && (j.status==='ready' || (Array.isArray(j.evaluations) && j.evaluations.length && j.final_score!=null && j.is_complete!==false)));
+}
+
+async function waitForReport(){
+  if(!sessionId) return { score:null, evals:null, incomplete:true, raw:null, msg:'No session' };
+  const started=Date.now();
+  const deadline=started+180000;
+  let posted=false;
+  while(Date.now()<deadline){
+    const snap=await fetchApi(`/api/interview/${sessionId}/report`);
+    const j=snap?.json;
+    if(reportLooksReady(j)){
+      return { score:j.final_score, evals:j.evaluations, incomplete:false, raw:j };
+    }
+    const answered=j?.answered ?? j?.answers?.length ?? 0;
+    const total=j?.total ?? j?.questions?.length ?? totalQs;
+    const complete=!!(j && (j.is_complete || answered>=total));
+    if(j && !complete && answered<total && Date.now()-started>12000){
+      return { score:null, evals:j.evaluations, incomplete:true, raw:j, msg:`Interview ended before completion (${answered}/${total} answered).` };
+    }
+    if(!posted || (snap && snap.status===400)){
+      const p=await fetchApi(`/api/interview/${sessionId}/report`, { method:'POST' });
+      if(p?.ok && reportLooksReady(p.json)){
+        return { score:p.json.final_score, evals:p.json.evaluations, incomplete:false, raw:p.json };
       }
-    }catch(e){ console.warn('report POST failed at', base, e); }
+      if(p?.status===202 || p?.ok) posted=true;
+      if(p?.status===400){
+        posted=false;
+      } else if(p?.status>=500){
+        posted=false;
+      }
+    }
+    await sleep(1500);
   }
-  for(const base of bases){
-    try{
-      const r=await fetch(`${base}/api/interview/${sessionId}`);
-      if(r.ok){ const j=await r.json(); const incomplete = !j.is_complete; return { score: incomplete? null : j.final_score, evals:j.evaluations, incomplete, raw:j }; }
-    }catch{}
+  const last=await fetchApi(`/api/interview/${sessionId}/report`);
+  const lj=last?.json;
+  if(reportLooksReady(lj)) return { score:lj.final_score, evals:lj.evaluations, incomplete:false, raw:lj };
+  if(lj && lj.is_complete===false){
+    const answered=lj.answered ?? lj.answers?.length ?? '?';
+    const total=lj.total ?? totalQs;
+    return { score:null, evals:lj.evaluations, incomplete:true, raw:lj, msg:`Interview ended before completion (${answered}/${total} answered).` };
   }
-  return { score:null, evals:null, incomplete:false, raw:null };
+  return { score:null, evals:lj?.evaluations, incomplete:false, raw:lj, error:true, msg:'Timed out generating the report. Please try End again.' };
 }
 
 async function generateAndShowReport(){
   if(reportInFlight) return;
   reportInFlight=true;
   stopProgressSync();
-  applyProgress({ current_index:currentIdx, total:totalQs, question:'Interview ended — generating your detailed report…', done:false });
-  setStatus('Generating report…','amber');
-  const { score, evals, incomplete, raw } = await fetchReportOnce();
-  if(incomplete){
-    const answered = raw?.answers?.length ?? raw?.raw?.answers?.length ?? '?';
-    const total = raw?.questions?.length ?? totalQs;
-    toast(`Interview ended before completion (${answered}/${total}) — no final score`);
-    showResults(null, evals, { incomplete:true, msg:`Interview ended before completion (${answered}/${total} answered). Complete all 6 questions for a final score.` });
-  } else {
-    showResults(score, evals);
+  showEvaluating();
+  startEvalAnim();
+  setStatus('Evaluating answers…','amber');
+  applyProgress({ current_index:currentIdx, total:totalQs, question:'Interview complete — evaluating your answers…', done:true });
+  try{
+    const { score, evals, incomplete, raw, error, msg } = await waitForReport();
+    stopEvalAnim(!incomplete && !error);
+    if(incomplete){
+      hideEvaluating();
+      const answered = raw?.answered ?? raw?.answers?.length ?? '?';
+      const total = raw?.total ?? raw?.questions?.length ?? totalQs;
+      toast(`Interview ended before completion (${answered}/${total}) — no final score`);
+      showResults(null, evals, { incomplete:true, msg: msg || `Interview ended before completion (${answered}/${total} answered). Complete all 6 questions for a final score.` });
+    } else if(error){
+      const box=$('evalErrorBox');
+      if(box){ box.textContent=msg || 'Could not generate report.'; box.classList.remove('hidden'); }
+      toast(msg || 'Report generation failed');
+      reportInFlight=false;
+      return;
+    } else {
+      hideEvaluating();
+      showResults(score, evals, { strengths: raw?.strengths, improvements: raw?.improvements });
+    }
+  }catch(e){
+    stopEvalAnim(false);
+    const box=$('evalErrorBox');
+    if(box){ box.textContent=String(e.message||e); box.classList.remove('hidden'); }
+    toast('Could not generate report');
+    reportInFlight=false;
+    return;
   }
+  hideEvaluating();
   reportInFlight=false;
 }
 

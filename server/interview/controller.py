@@ -65,40 +65,43 @@ class InterviewController:
     async def evaluate_interview(self, state: InterviewState, concurrency: int = 3) -> dict:
         """POST-INTERVIEW batch evaluation. Runs after is_complete."""
         if not state.answers:
-            return {"evaluations": [], "final_score": 0}
-        q_by_id = {q["id"]: q for q in state.questions}
+            state.report_status = "ready"
+            state.final_score = 0
+            return {"evaluations": [], "final_score": 0, "strengths": [], "improvements": []}
+
+        def qid(value):
+            try:
+                return int(value)
+            except Exception:
+                return value
+
+        q_by_id = {qid(q["id"]): q for q in state.questions}
         sem = asyncio.Semaphore(concurrency)
 
         async def eval_one(index: int, ans_entry: dict):
             async with sem:
-                qid = ans_entry.get("question_id")
-                q = q_by_id.get(qid)
+                raw_qid = ans_entry.get("question_id")
+                q = q_by_id.get(qid(raw_qid))
                 if q is None:
                     q = state.questions[index] if index < len(state.questions) else None
                 if q is None:
-                    return {"question_id": qid, "score": None, "feedback": "Evaluation unavailable.", "strengths": [], "improvements": [], "error": "No matching question"}
+                    return {"question_id": raw_qid, "score": 0, "feedback": "Evaluation unavailable.", "strengths": [], "improvements": [], "error": "No matching question"}
                 try:
                     ev = await evaluate_answer(question=q, answer=ans_entry.get("answer", ""))
-                    ev["question_id"] = q["id"]
+                    ev["question_id"] = qid(q["id"])
                     return ev
                 except Exception as e:
-                    logger.warning(f"eval failed for Q{qid or q['id']}: {e}")
-                    return {"question_id": q["id"], "score": None, "feedback": "Evaluation unavailable.", "strengths": [], "improvements": [], "error": str(e)}
+                    logger.warning(f"eval failed for Q{raw_qid or q['id']}: {e}")
+                    return {"question_id": qid(q["id"]), "score": 0, "feedback": "Evaluation unavailable.", "strengths": [], "improvements": [], "error": str(e)}
 
         results = await asyncio.gather(*(eval_one(i, a) for i, a in enumerate(state.answers)))
         state.evaluations = list(results)
-        # Only sum non-None scores; None means evaluation failed and should not contribute fake score
-        # For final_score, treat None as 0 but mark report incomplete via caller
-        # Calculate final using scoring helper that handles None -> 0
-        for ev in state.evaluations:
-            if ev.get("score") is None:
-                ev["score"] = 0
         total = calculate_final_score(state)
         strengths = []
         improvements = []
         for ev in results:
-            strengths.extend(ev.get("strengths", []))
-            improvements.extend(ev.get("improvements", []))
+            strengths.extend(ev.get("strengths") or [])
+            improvements.extend(ev.get("improvements") or [])
 
         def dedupe(seq):
             seen = set()
@@ -109,6 +112,9 @@ class InterviewController:
                     out.append(x)
             return out
 
+        failed = sum(1 for ev in results if ev.get("error"))
+        state.report_status = "ready"
+        state.report_error = f"{failed} question(s) could not be evaluated" if failed else None
         return {
             "evaluations": state.evaluations,
             "final_score": total,

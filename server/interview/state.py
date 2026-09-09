@@ -16,6 +16,9 @@ class InterviewState:
 
     final_score: float | None = None
 
+    report_status: str = "idle"
+    report_error: str | None = None
+
 
     def get_current_question(self):
         if self.current_question_index >= len(self.questions):
@@ -37,7 +40,7 @@ class InterviewState:
 
         self.answers.append(
             {
-                "question_id": current_question["id"],
+                "question_id": int(current_question["id"]),
                 "answer": answer,
             }
         )
@@ -56,8 +59,9 @@ class InterviewState:
 
 
     def is_interview_complete(self):
-
+        if not self.questions:
+            return False
         return (
-            self.current_question_index
-            >= len(self.questions)
+            self.current_question_index >= len(self.questions)
+            or len(self.answers) >= len(self.questions)
         )
