@@ -101,7 +101,7 @@ def _load_dynamic_docs():
 
 
 async def run_bot(transport, resume: str | None = None, job_description: str | None = None, session_id: str | None = None):
-    logger.info("Starting AI Interview Agent — 10-min Screening (voice) Mode — deterministic pipeline (STT→Processor→TTS, no live LLM)")
+    logger.info("Starting AI Interview Agent — voice pipeline (STT→Processor→TTS, barge-in + turn router)")
 
     controller = InterviewController()
 
@@ -179,7 +179,7 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
             transport.output(),
         ]
     )
-    worker = PipelineWorker(pipeline, params=PipelineParams(allow_interruptions=False, enable_metrics=True, enable_usage_metrics=True))
+    worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True))
 
     if WhiskerObserver is not None:
         try:

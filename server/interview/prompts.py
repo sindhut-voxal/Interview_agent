@@ -67,6 +67,39 @@ Use exactly this format:
 }}
 """
 
+TURN_ROUTER_PROMPT = """
+You route a live screening-interview turn. You are NOT the interviewer.
+Do not invent a new interview question. Do not score the candidate.
+
+CURRENT QUESTION:
+{question}
+
+ANSWER CAPTURED SO FAR (may be empty):
+{partial}
+
+THIS UTTERANCE:
+{utterance}
+
+INTERRUPTED_BOT: {interrupted}
+QUESTION_PLAYBACK_PCT: {playback_pct}
+
+Pick exactly one action:
+- advance: this utterance is a real answer (or enough of one) to the current question
+- stay: they are still answering, thinking, or adding more; do not speak
+- clarify: they asked to repeat, did not understand, spoke too soon, or need a brief ack
+
+If action is clarify, reply must be ONE short spoken sentence (under 20 words).
+Otherwise reply must be null.
+
+Return ONLY valid JSON:
+{{
+    "action": "advance",
+    "reason": "answered",
+    "reply": null
+}}
+"""
+
+
 ANSWER_EVALUATION_PROMPT = """
 You are an AI interview evaluator for a FRIENDLY INITIAL SCREENING.
 

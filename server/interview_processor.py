@@ -1,13 +1,13 @@
 import asyncio
-import re
+import time
 
 from loguru import logger
 
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
+    InterruptionFrame,
     InterimTranscriptionFrame,
-    TextFrame,
     TranscriptionFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
@@ -24,15 +24,22 @@ from pipecat.processors.frame_processor import (
 
 from interview.controller import InterviewController
 from interview.state import InterviewState
+from interview.turn_router import decide_turn, looks_like_interrupt
 from session_store import save_session, acquire_report_lock, release_report_lock
 
-# Inline lightweight normalization so we don't depend on LLMTextFrame path.
-# Reuse text_normaliser.normalize_for_tts if available.
 try:
     from text_normaliser import normalize_for_tts  # type: ignore
 except Exception:
     def normalize_for_tts(text: str) -> str:  # fallback no-op
         return text.strip()
+
+SPEAKING = "SPEAKING"
+LISTENING = "LISTENING"
+DECIDING = "DECIDING"
+CLARIFYING = "CLARIFYING"
+
+ECHO_WINDOW_S = 0.45
+CHARS_PER_SEC = 14.0
 
 
 class InterviewProcessor(FrameProcessor):
@@ -52,21 +59,39 @@ class InterviewProcessor(FrameProcessor):
         self.session_id = session_id
 
         self.interview_finished = False
-        # Buffer accumulates ONLY final transcripts. Interim is used solely to reset debounce.
         self._buffer: str = ""
+        self._partial_answer: str = ""
         self._debounce_s = debounce_s
         self._min_chars = min_chars
         self._debounce_task: asyncio.Task | None = None
         self._processing: bool = False
-        # Speaking/Listening state: question delivery must be atomic
-        self._is_speaking: bool = True  # start speaking (intro Q1) until first TTSStoppedFrame + guard
+        self._turn_state: str = SPEAKING
+        self._is_speaking: bool = True
         self._guard_task: asyncio.Task | None = None
         self._report_triggered: bool = False
+        self._interrupted: bool = False
+        self._barge_in_this_turn: bool = False
+        self._tts_started_at: float | None = None
+        self._tts_expected_s: float = 1.0
+        self._tts_text: str = ""
 
-    # ---------- debounce helpers ----------
+    def _playback_pct(self) -> float:
+        if not self._tts_started_at:
+            return 1.0 if self._turn_state != SPEAKING else 0.0
+        elapsed = time.monotonic() - self._tts_started_at
+        expected = max(0.8, self._tts_expected_s)
+        return max(0.0, min(1.0, elapsed / expected))
+
+    def _merge_text(self, left: str, right: str) -> str:
+        left = (left or "").strip()
+        right = (right or "").strip()
+        if not left:
+            return right
+        if not right:
+            return left
+        return f"{left} {right}"
 
     def _reset_debounce(self):
-        """Reset the silence timer because candidate is still speaking (interim detected)."""
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
         self._debounce_task = asyncio.create_task(self._debounced_flush())
@@ -78,9 +103,45 @@ class InterviewProcessor(FrameProcessor):
         except asyncio.CancelledError:
             pass
 
+    def _clear_stale_stt(self):
+        if self._buffer:
+            logger.info(f"Clearing stale STT buffer: '{self._buffer[:80]}'")
+            self._buffer = ""
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+            self._debounce_task = None
+
+    async def _stop_bot_speech(self):
+        """Cut in-progress TTS so the candidate's interrupt is heard."""
+        self._interrupted = True
+        self._barge_in_this_turn = True
+        self._is_speaking = False
+        self._turn_state = LISTENING
+        if self._guard_task and not self._guard_task.done():
+            self._guard_task.cancel()
+            self._guard_task = None
+        try:
+            await self.broadcast_interruption()
+            logger.info("BARGE-IN -> broadcast InterruptionFrame, now LISTENING")
+        except Exception as e:
+            logger.warning(f"broadcast_interruption failed: {e}")
+
+    async def _maybe_barge_in(self, text: str) -> bool:
+        if self._turn_state not in {SPEAKING, CLARIFYING} and not self._is_speaking:
+            return False
+        if self._tts_started_at and (time.monotonic() - self._tts_started_at) < ECHO_WINDOW_S:
+            logger.info(f"STT during echo window — dropped: '{text[:60]}'")
+            return True
+        if not looks_like_interrupt(text):
+            logger.info(f"STT during SPEAKING too short for barge-in: '{text[:60]}'")
+            return True
+        await self._stop_bot_speech()
+        return False
+
     async def _flush_buffer(self):
-        """Store answer and advance. No LLM in live path."""
-        if self.interview_finished:
+        if self.interview_finished or self._processing:
+            return
+        if self._turn_state in {SPEAKING, CLARIFYING} and self._is_speaking:
             return
         answer = self._buffer.strip()
         self._buffer = ""
@@ -88,14 +149,66 @@ class InterviewProcessor(FrameProcessor):
             logger.info("STT buffer empty — ignoring")
             return
         if len(answer) < self._min_chars:
-            logger.info(f"STT buffer below threshold ({len(answer)} chars) — still storing: '{answer}'")
-        # Filler filter: single-word filler utterances should not advance interview
-        _filler = answer.lower().strip(" .!?,")
-        if _filler in {"oh yeah", "oh yeah.", "yeah", "yes", "hello", "hello?", "hi", "hey", "okay", "ok", "thanks", "thank you"}:
-            logger.info(f"STT filler ignored: '{answer}'")
+            logger.info(f"STT buffer below threshold ({len(answer)} chars): '{answer}'")
+
+        self._processing = True
+        self._turn_state = DECIDING
+        interrupted = self._barge_in_this_turn
+        playback_pct = self._playback_pct()
+        current = self.state.get_current_question() or {}
+        question_text = current.get("question") or ""
+        try:
+            decision = await decide_turn(
+                question=question_text,
+                partial=self._partial_answer,
+                utterance=answer,
+                interrupted=interrupted,
+                playback_pct=playback_pct,
+            )
+            await self._apply_decision(decision, answer, question_text)
+        except Exception as e:
+            logger.exception(f"Error in _flush_buffer: {e}")
+            combined = self._merge_text(self._partial_answer, answer)
+            if len(combined) >= 50:
+                await self._advance_with_answer(combined)
+            else:
+                self._partial_answer = combined
+                self._turn_state = LISTENING
+                self._is_speaking = False
+        finally:
+            self._processing = False
+            self._barge_in_this_turn = False
+
+    async def _apply_decision(self, decision: dict, utterance: str, question_text: str):
+        action = decision.get("action")
+        reason = decision.get("reason")
+        logger.info(f"Turn decision={action} reason={reason} barge_in={self._barge_in_this_turn}")
+
+        if action == "advance":
+            combined = self._merge_text(self._partial_answer, utterance)
+            self._partial_answer = ""
+            await self._advance_with_answer(combined)
             return
+
+        if action == "stay":
+            self._partial_answer = self._merge_text(self._partial_answer, utterance)
+            self._turn_state = LISTENING
+            self._is_speaking = False
+            logger.info(f"STAY on Q{self.state.current_question_index + 1} (partial={len(self._partial_answer)} chars)")
+            return
+
+        # clarify
+        reply = (decision.get("reply") or "").strip()
+        if reason in {"clarification_request", "wait"} or self._barge_in_this_turn:
+            spoken = " ".join(x for x in (reply, question_text) if x).strip()
+        else:
+            spoken = reply or question_text
+        self._turn_state = CLARIFYING
+        await self._speak(spoken, progress_question=self.state.get_current_question())
+
+    async def _advance_with_answer(self, answer: str):
         q_idx = self.state.current_question_index + 1
-        logger.info(f"STT final (debounced) → storing answer for Q{q_idx}: '{answer[:120]}...' ({len(answer)} chars)")
+        logger.info(f"ADVANCE Q{q_idx}: '{answer[:120]}...' ({len(answer)} chars)")
         try:
             next_question = await self.controller.submit_answer(state=self.state, answer=answer)
             if self.session_id:
@@ -103,9 +216,10 @@ class InterviewProcessor(FrameProcessor):
                     save_session(self.session_id, self.state)
                 except Exception as e:
                     logger.warning(f"Failed to persist session {self.session_id}: {e}")
+            self._partial_answer = ""
             await self._push_result(next_question)
         except Exception as e:
-            logger.exception(f"Error in _flush_buffer: {e}")
+            logger.exception(f"Error advancing question: {e}")
             try:
                 curr = self.state.get_current_question()
                 if curr is not None and len(self.state.answers) > self.state.current_question_index:
@@ -114,15 +228,6 @@ class InterviewProcessor(FrameProcessor):
                 await self._push_result(nxt)
             except Exception as rec_e:
                 logger.error(f"Recovery also failed: {rec_e}")
-
-    def _clear_stale_stt(self):
-        """Clear buffer/debounce leaked from previous turn."""
-        if self._buffer:
-            logger.info(f"Clearing stale STT buffer: '{self._buffer[:80]}'")
-            self._buffer = ""
-        if self._debounce_task and not self._debounce_task.done():
-            self._debounce_task.cancel()
-            self._debounce_task = None
 
     def _progress_payload(self, next_question):
         total = len(self.state.questions)
@@ -145,41 +250,41 @@ class InterviewProcessor(FrameProcessor):
         }
 
     async def _push_ui_progress(self, next_question):
-        """Notify the browser of the current question over the WebRTC data channel."""
         await self.push_frame(
             OutputTransportMessageUrgentFrame(message=self._progress_payload(next_question)),
             FrameDirection.DOWNSTREAM,
         )
 
-    async def _push_result(self, next_question):
-        """Push next question or closing message as ONE atomic TTS utterance.
-
-        Uses TTSSpeakFrame which creates a dedicated audio context per utterance
-        in Pipecat 1.4.0. This guarantees the TTS service synthesizes the entire
-        text as a single logical utterance instead of splitting a TextFrame into
-        multiple sentence-level aggregations (which Deepgram would speak as
-        independent chunks, causing awkward pauses and merged transition+question
-        audio).
-        """
+    async def _speak(self, text: str, *, progress_question=None):
+        spoken = normalize_for_tts(text)
         self._clear_stale_stt()
-        await self._push_ui_progress(next_question)
+        self._is_speaking = True
+        self._interrupted = False
+        self._tts_text = spoken
+        self._tts_expected_s = max(0.8, len(spoken) / CHARS_PER_SEC)
+        self._tts_started_at = time.monotonic()
+        if self._guard_task and not self._guard_task.done():
+            self._guard_task.cancel()
+            self._guard_task = None
+        if progress_question is not None:
+            await self._push_ui_progress(progress_question)
+        logger.info(f"{self._turn_state} -> TTSSpeakFrame ({len(spoken)} chars)")
+        await self.push_frame(TTSSpeakFrame(text=spoken), FrameDirection.DOWNSTREAM)
+
+    async def _push_result(self, next_question):
+        """Push next question or closing message as ONE atomic TTS utterance."""
+        self._partial_answer = ""
+        self._barge_in_this_turn = False
         if next_question is None:
             self.interview_finished = True
-            final_message = "Thank you. That concludes the interview."
-            final_message = normalize_for_tts(final_message)
-            self._is_speaking = True
-            if self._guard_task and not self._guard_task.done():
-                self._guard_task.cancel()
-                self._guard_task = None
-            logger.info("SPEAKING -> pushing final message (atomic TTSSpeakFrame)")
-            await self.push_frame(TTSSpeakFrame(text=final_message), FrameDirection.DOWNSTREAM)
-            # Persist completion so /report can batch-evaluate; trigger report once.
+            self._turn_state = SPEAKING
+            await self._speak("Thank you. That concludes the interview.", progress_question=None)
+            await self._push_ui_progress(None)
             if self.session_id:
                 try:
                     save_session(self.session_id, self.state)
                 except Exception as e:
                     logger.warning(f"Failed to persist session {self.session_id} on completion: {e}")
-            # Trigger post-interview report generation in background (once, non-blocking).
             if not getattr(self, "_report_triggered", False):
                 self._report_triggered = True
                 try:
@@ -187,18 +292,10 @@ class InterviewProcessor(FrameProcessor):
                 except Exception as e:
                     logger.warning(f"Failed to schedule report generation: {e}")
             return
-        # Q2-Q6: speak ONLY the next question text — no filler.
-        question_text = next_question["question"]
-        question_text = normalize_for_tts(question_text)
-        self._is_speaking = True
-        if self._guard_task and not self._guard_task.done():
-            self._guard_task.cancel()
-            self._guard_task = None
-        logger.info(f"SPEAKING -> pushing Q{self.state.current_question_index+1} atomic TTSSpeakFrame ({len(question_text)} chars)")
-        await self.push_frame(TTSSpeakFrame(text=question_text), FrameDirection.DOWNSTREAM)
+        self._turn_state = SPEAKING
+        await self._speak(next_question["question"], progress_question=next_question)
 
     async def _trigger_report(self):
-        """Background batch evaluation after interview completes. Idempotent."""
         sid = self.session_id
         locked = False
         try:
@@ -238,12 +335,19 @@ class InterviewProcessor(FrameProcessor):
         if self._guard_task and not self._guard_task.done():
             self._guard_task.cancel()
             self._guard_task = None
-        if not self._is_speaking:
-            logger.info("SPEAKING started (TTSStartedFrame)")
         self._is_speaking = True
+        if self._turn_state not in {CLARIFYING, SPEAKING}:
+            self._turn_state = SPEAKING
+        self._tts_started_at = time.monotonic()
+        logger.info("SPEAKING started (TTSStartedFrame)")
 
     async def _on_tts_stopped(self):
-        # Guard 200ms before transitioning to LISTENING — handles multi-sentence splits + filters bot echo
+        if self._interrupted:
+            self._is_speaking = False
+            self._turn_state = LISTENING
+            self._interrupted = False
+            logger.info("TTS stopped after barge-in — keeping STT buffer")
+            return
         if self._guard_task and not self._guard_task.done():
             self._guard_task.cancel()
 
@@ -252,9 +356,13 @@ class InterviewProcessor(FrameProcessor):
                 await asyncio.sleep(0.2)
                 if self.interview_finished:
                     return
+                if self._interrupted or self._turn_state == DECIDING:
+                    return
                 self._clear_stale_stt()
                 self._is_speaking = False
-                logger.info("TTSStoppedFrame + 200ms guard -> LISTENING (buffer cleared, fresh turn)")
+                self._turn_state = LISTENING
+                self._barge_in_this_turn = False
+                logger.info("TTSStoppedFrame + 200ms guard -> LISTENING")
             except asyncio.CancelledError:
                 return
 
@@ -284,6 +392,13 @@ class InterviewProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
+        if isinstance(frame, InterruptionFrame):
+            self._is_speaking = False
+            if self._turn_state in {SPEAKING, CLARIFYING}:
+                self._turn_state = LISTENING
+            await self.push_frame(frame, direction)
+            return
+
         if isinstance(frame, (TTSStartedFrame, BotStartedSpeakingFrame)):
             await self._on_tts_started()
             await self.push_frame(frame, direction)
@@ -293,44 +408,33 @@ class InterviewProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
             return
 
-        # Interim: used ONLY to detect continued speech and reset debounce.
-        # Never append interim text to buffer (interim is an evolving hypothesis).
         if isinstance(frame, InterimTranscriptionFrame):
             txt = frame.text.strip()
-            if not txt:
+            if not txt or self.interview_finished:
                 return
-            if self._is_speaking:
-                logger.info(f"STT interim during SPEAKING — dropped: '{txt[:60]}'")
+            dropped = await self._maybe_barge_in(txt)
+            if dropped:
                 return
-            # LISTENING: if we already have final text buffered, interim means candidate still speaking
             if self._buffer:
-                logger.info(f"STT interim (LISTENING, buffer={len(self._buffer)}) — resetting debounce: '{txt[:60]}'")
+                logger.info(f"STT interim (buffer={len(self._buffer)}) — resetting debounce: '{txt[:60]}'")
                 self._reset_debounce()
-            else:
-                logger.info(f"STT interim (LISTENING, no buffer yet): '{txt[:60]}'")
-            # Do NOT forward downstream (no LLM aggregator in deterministic pipeline)
             return
 
         if isinstance(frame, TranscriptionFrame):
             if self.interview_finished:
                 return
-            if self._is_speaking:
-                logger.info(f"STT final during SPEAKING — dropped: '{frame.text.strip()[:60]}'")
-                return
-
             answer = frame.text.strip()
-            logger.info(f"STT transcript received: '{answer[:80]}' (buffer len before={len(self._buffer)})")
-
             if not answer:
                 return
+            dropped = await self._maybe_barge_in(answer)
+            if dropped:
+                return
 
-            # Accumulate ONLY final transcripts
+            logger.info(f"STT transcript received: '{answer[:80]}' (buffer len before={len(self._buffer)})")
             if self._buffer:
                 self._buffer += " " + answer
             else:
                 self._buffer = answer
-
-            # Reset debounce timer (candidate may still be speaking; interim will extend it)
             if self._debounce_task and not self._debounce_task.done():
                 self._debounce_task.cancel()
             self._debounce_task = asyncio.create_task(self._debounced_flush())
