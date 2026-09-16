@@ -32,6 +32,20 @@ from pipecat.runner.types import RunnerArguments, SmallWebRTCRunnerArguments
 from pipecat.services.tts_service import TextAggregationMode
 
 try:
+    from text_normaliser import TextNormalizerProcessor
+except ImportError:
+    TextNormalizerProcessor = None  # type: ignore
+
+try:
+    from pipecat.audio.vad.silero import SileroVADAnalyzer
+    from pipecat.audio.vad.vad_analyzer import VADParams
+    from pipecat.processors.audio.vad_processor import VADProcessor
+except Exception:
+    SileroVADAnalyzer = None  # type: ignore
+    VADParams = None  # type: ignore
+    VADProcessor = None  # type: ignore
+
+try:
     from pipecat_whisker import WhiskerObserver
 except ImportError:
     WhiskerObserver = None  # type: ignore
@@ -169,16 +183,29 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
         ),
     )
 
-    # Deterministic pipeline: no live Gemini, no LLMContext, no aggregators, no text normaliser frame.
-    pipeline = Pipeline(
-        [
-            transport.input(),
-            stt,
-            interview_processor,
-            tts,
-            transport.output(),
-        ]
-    )
+    stages = [transport.input()]
+    if VADProcessor is not None and SileroVADAnalyzer is not None:
+        try:
+            stages.append(
+                VADProcessor(
+                    vad_analyzer=SileroVADAnalyzer(
+                        params=VADParams(start_secs=0.2, stop_secs=0.35, confidence=0.7)
+                    )
+                )
+            )
+            logger.info("Silero VAD attached (cascading barge-in)")
+        except Exception as e:
+            logger.warning(f"Silero VAD unavailable: {e}")
+    else:
+        logger.warning("Silero VAD not installed — barge-in falls back to STT")
+
+    stages.extend([stt, interview_processor])
+    if TextNormalizerProcessor is not None:
+        stages.append(TextNormalizerProcessor())
+    stages.extend([tts, transport.output()])
+
+    logger.info("Cascading pipeline: WebRTC → VAD → DeepgramSTT → InterviewProcessor → TTS")
+    pipeline = Pipeline(stages)
     worker = PipelineWorker(pipeline, params=PipelineParams(enable_metrics=True, enable_usage_metrics=True))
 
     if WhiskerObserver is not None:
@@ -198,15 +225,14 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
         if first_question is None:
             logger.error("No interview questions generated")
             return
-        # Q1: Speak ONLY the Q1 text as ONE atomic utterance via TTSSpeakFrame.
-        # No intro filler, no prepended transition. Natural pause before answer
-        # is provided by TTS completion + InterviewProcessor's 200ms guard.
+        # Greeting, then Q1 as separate utterances so TTS can pause.
         try:
             from text_normaliser import normalize_for_tts as _norm
         except Exception:
             _norm = lambda x: x.strip()
+        greeting = _norm("Hi, thanks for joining. This is a short screening, about ten minutes.")
         q1_text = _norm(first_question["question"])
-        logger.info(f"Queueing Q1 as atomic TTSSpeakFrame ({len(q1_text)} chars)")
+        logger.info(f"Queueing greeting + Q1 TTSSpeakFrames ({len(greeting)}+{len(q1_text)} chars)")
         await worker.queue_frame(
             OutputTransportMessageUrgentFrame(
                 message={
@@ -219,6 +245,7 @@ async def run_bot(transport, resume: str | None = None, job_description: str | N
                 }
             )
         )
+        await worker.queue_frame(TTSSpeakFrame(text=greeting, append_to_context=False))
         await worker.queue_frame(TTSSpeakFrame(text=q1_text, append_to_context=False))
 
     @transport.event_handler("on_client_disconnected")
@@ -344,7 +371,7 @@ try:
 
         @_runner_app.get("/api/health", include_in_schema=False)
         async def _health_runner():
-            return {"status": "ok", "mode": "voice-pipeline", "pipeline": "SmallWebRTC→DeepgramSTT(700ms)→InterviewProcessor→DeepgramTTS"}
+            return {"status": "ok", "mode": "voice-pipeline", "pipeline": "SmallWebRTC→VAD→DeepgramSTT→InterviewProcessor→DeepgramTTS"}
 
 except Exception as _e:
     logger.warning(f"Could not mount custom UI on runner: {_e}")

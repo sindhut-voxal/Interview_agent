@@ -1,4 +1,5 @@
 pipecat-ai[webrtc,google,deepgram,runner]==1.4.0
+av>=14.0.0,<18.0.0
 pipecat-ai-whisker==1.0.0
 python-dotenv
 loguru

@@ -2,7 +2,7 @@ import re
 
 from loguru import logger
 
-from pipecat.frames.frames import LLMTextFrame
+from pipecat.frames.frames import LLMTextFrame, TTSSpeakFrame
 
 from pipecat.processors.frame_processor import (
     FrameDirection,
@@ -188,18 +188,8 @@ class TextNormalizerProcessor(
             direction,
         )
 
-        if isinstance(
-            frame,
-            LLMTextFrame,
-        ):
-
-            normalized_text = (
-                normalize_for_tts(
-                    frame.text
-                )
-            )
-
-            frame.text = normalized_text
+        if isinstance(frame, (LLMTextFrame, TTSSpeakFrame)) and getattr(frame, "text", None):
+            frame.text = normalize_for_tts(frame.text)
 
         await self.push_frame(
             frame,
