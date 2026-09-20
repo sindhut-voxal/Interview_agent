@@ -852,6 +852,12 @@ async function startVoiceWithCache(){
     };
     pc.oniceconnectionstatechange=()=>{ if(pc.iceConnectionState==='connected'){ const v=$('meetViz'); if(v) v.style.opacity='1'; } };
 
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      throw new Error('Microphone unavailable — navigator.mediaDevices.getUserMedia is undefined. Open the page via http://localhost:8000 or http://localhost:7860 (localhost is required; file:// and plain http://<ip> block mic). Use Chrome/Edge, allow mic permission, and ensure no other app blocks the mic.');
+    }
+    if(!window.isSecureContext){
+      console.warn('[webrtc] not a secure context — getUserMedia may fail. Use localhost or HTTPS.');
+    }
     const stream = await navigator.mediaDevices.getUserMedia({audio:true});
     stream.getTracks().forEach(t=> pc.addTrack(t, stream));
     if($('aiSub')) $('aiSub').textContent='Microphone ready — negotiating…';
@@ -899,7 +905,7 @@ async function startVoiceWithCache(){
     console.error(e);
     setStatus('Failed','red');
     if($('aiSub')) $('aiSub').textContent='Connection failed';
-    applyProgress({ current_index:currentIdx, total:totalQs, question: e.message + ' — is python server/bot.py running on '+ (runnerBase||'7860') +'?', done:false });
+    applyProgress({ current_index:currentIdx, total:totalQs, question: e.message + ' — is python server/bot.py running on '+ (runnerBase||'http://localhost:7860') +'?', done:false });
     $('runnerHint').classList.remove('hidden'); const rh=$('runnerHintMeet'); if(rh) rh.classList.remove('hidden');
     toast(e.message);
     if(pc) try{pc.close();}catch{}
